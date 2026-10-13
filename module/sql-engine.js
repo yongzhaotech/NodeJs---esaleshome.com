@@ -1,7 +1,7 @@
 'use strict';
 require('dotenv').config();
 
-let MYSQL = require('mysql'),
+let MYSQL = require('mysql2'),
 	SQL = MYSQL.createConnection({
 		host: process.env.HOST,
 		user: process.env.USER,
