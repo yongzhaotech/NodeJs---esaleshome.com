@@ -40,7 +40,7 @@ const checkSession = (req, res) => {
 const accessControl = (req, res, next) => {
 	let origin = req.get('origin');
 	res.append('Access-Control-Allow-Credentials', true);
-	if(origin.toLowerCase() in origins) {
+	if(origin && origin.toLowerCase() in origins) {
 		res.append('Access-Control-Allow-Origin', origin);
 	}
 	if(!req.cookies.lang) { res.cookie('lang', 'en'); }

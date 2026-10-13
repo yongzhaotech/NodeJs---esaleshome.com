@@ -18,8 +18,8 @@ const express = require('express'),
 	app = express();
 
 app.use(cookieParser());
+app.use('/image/ad', express.static(config.imageDirectory, {fallthrough: false}));
 app.use(middleWare.accessControl);
-app.use('/ads/src', express.static(__dirname));
 
 app.post('/advertise', express.urlencoded({extended: false}), adEngine.lists);
 
