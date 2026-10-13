@@ -19,7 +19,7 @@
     "fluent-ffmpeg": "^2.1.2",
     "jimp": "^1.6.1",
     "multer": "^2.4.0",
-    "mysql": "^2.18.1",
+    "mysql2": "^3.24.6",
     "nodemailer": "^10.1.0"
   }
 }
