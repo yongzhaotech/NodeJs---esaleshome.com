@@ -1,16 +1,15 @@
 'use strict';
 
 const sql = require('./sql-engine'),
-	content = require('../js/static-content'),
 	fs = require('fs'),
-	jimp = require('jimp');
+	{Jimp, JimpMime, scaleToFit} = require('./image-utils');
 
 const root = 'C:/WebServer/React/src', 
 uploadDirectory = './file/upload',
 mimeType = ({
-	[jimp.MIME_PNG]: true,
-	[jimp.MIME_JPEG]: true,
-	[jimp.MIME_BMP]: true
+	[JimpMime.png]: true,
+	[JimpMime.jpeg]: true,
+	[JimpMime.bmp]: true
 }),
 smallImageWidth = 100,
 smallImageHeight = 100,
@@ -39,22 +38,19 @@ const processPhoto = (req, advertiseId, mainPict) => {
 							photo = `${uploadDirectory}/${file.filename}`,
 							small = `${smallImage}/${pictureId}.jpg`,
 							large = `${largeImage}/${pictureId}.jpg`;
-						jimp.read(photo).then(image => {
-							let copy = image.clone();
-							copy.scaleToFit(largeImageWidth, largeImageHeight).writeAsync(large).then(() => {}).catch(() => {});
-							jimp.read(smallMask).then(source => {
-								copy = image.clone().scaleToFit(smallImageWidth, smallImageHeight);
-								let [x, y] = [Math.floor((smallImageWidth - copy.bitmap.width) / 2), Math.floor((smallImageHeight - copy.bitmap.height) / 2)];
-								source.composite(copy, x, y).writeAsync(small).then(() => {}).catch(() => {});
-								deleteFile(file);
-								res(1);
-							}).catch(() => {
-								deleteFile(file);
-								rej(1);								
-							});
-						}).catch(() => {
+						Jimp.read(photo).then(image => {
+							let copy = scaleToFit(image.clone(), smallImageWidth, smallImageHeight),
+								[x, y] = [Math.floor((smallImageWidth - copy.bitmap.width) / 2), Math.floor((smallImageHeight - copy.bitmap.height) / 2)];
+							return Promise.all([
+								scaleToFit(image.clone(), largeImageWidth, largeImageHeight).write(large),
+								Jimp.read(smallMask).then(source => source.composite(copy, x, y).write(small))
+							]);
+						}).then(() => {
 							deleteFile(file);
-							rej(1);
+							res(1);
+						}).catch(error => {
+							deleteFile(file);
+							rej(error);
 						});
 					}
 				}).catch(() => {
