@@ -1,9 +1,10 @@
 'use strict';
 
 const fs = require('fs'),
+	path = require('path'),
 	{Jimp, JimpMime, scaleToFit} = require('./image-utils');
 
-const root = 'C:/UI/Node/server/file/video', 
+const root = process.env.VIDEO_OUTPUT_DIR || path.resolve(__dirname, '..', 'file', 'video'),
 uploadDirectory = './file/upload',
 mimeType = ({
 	[JimpMime.png]: true,

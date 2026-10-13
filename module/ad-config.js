@@ -1,10 +1,11 @@
 'use strict';
 
 const sql = require('./sql-engine'),
+	path = require('path'),
 	fs = require('fs'),
 	{Jimp, JimpMime, scaleToFit} = require('./image-utils');
 
-const root = 'C:/WebServer/React/src', 
+const imageDirectory = process.env.AD_IMAGE_DIR || path.resolve(__dirname, '..', 'image', 'ad'),
 uploadDirectory = './file/upload',
 mimeType = ({
 	[JimpMime.png]: true,
@@ -15,8 +16,8 @@ smallImageWidth = 100,
 smallImageHeight = 100,
 largeImageWidth = 500,
 largeImageHeight = 500,
-smallImage = `${root}/image/ad/small`,
-largeImage = `${root}/image/ad/large`,
+smallImage = path.join(imageDirectory, 'small'),
+largeImage = path.join(imageDirectory, 'large'),
 smallMask = `${uploadDirectory}/small_mask.jpg`;
 
 const deleteFile = file => {
@@ -117,6 +118,7 @@ const deleteAdvertise = advertiseId => {
 };
 
 exports.uploadDirectory = uploadDirectory;
+exports.imageDirectory = imageDirectory;
 exports.photoSize = 7340032;
 exports.fileCount = 10;
 exports.mimeType = mimeType;
