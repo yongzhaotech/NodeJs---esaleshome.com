@@ -9,12 +9,22 @@ let MYSQL = require('mysql'),
 		database: process.env.DATABASE
 	});
 
+const logDatabaseError = (message, error) => {
+	console.error(`${message}: ${error.code || error.message}`);
+};
+
 SQL.connect(error => {
-	if(error) {}
+	if(error) {
+		logDatabaseError('MySQL connection failed', error);
+	}
 });
 
 setInterval(() => {
-    SQL.query('select 1');
+	SQL.query('select 1', error => {
+		if(error) {
+			logDatabaseError('MySQL keepalive failed', error);
+		}
+	});
 }, 60000);
 
 const sqlError = error => {

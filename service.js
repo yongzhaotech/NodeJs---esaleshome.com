@@ -3,9 +3,7 @@
 require('dotenv').config();
 
 const express = require('express'),
-	path = require('path'),
 	cookieParser = require('cookie-parser'),
-	bodyParser = require('body-parser'),
 	multer = require('multer'),
 	config = require('./module/ad-config'),
 	upload = multer({dest: config.uploadDirectory, fileFilter: config.fileFilter, limits: {fileSize: config.photoSize, files: config.fileCount}}),
