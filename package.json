@@ -25,6 +25,7 @@
     "nodemailer": "^10.1.0"
   },
   "devDependencies": {
+    "@types/fluent-ffmpeg": "^2.1.28",
     "@types/node": "^20.19.43",
     "typescript": "^5.9.3"
   }
