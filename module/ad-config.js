@@ -5,7 +5,8 @@ const sql = require('./sql-engine'),
 	fs = require('fs'),
 	{Jimp, JimpMime, scaleToFit} = require('./image-utils');
 
-const imageDirectory = process.env.AD_IMAGE_DIR || path.resolve(__dirname, '..', 'image', 'ad'),
+const appRoot = path.basename(path.resolve(__dirname, '..')) === 'dist' ? path.resolve(__dirname, '..', '..') : path.resolve(__dirname, '..'),
+imageDirectory = process.env.AD_IMAGE_DIR || path.resolve(appRoot, 'image', 'ad'),
 uploadDirectory = './file/upload',
 mimeType = ({
 	[JimpMime.png]: true,
