@@ -4,10 +4,7 @@ const fs = require('fs'),
 	ffmpeg = require('fluent-ffmpeg'),
 	config = require('./video-config');
 	
-interface UploadedImage {
-	filename: string;
-	fieldname: string;
-}
+interface UploadedImage extends Express.Multer.File {}
 
 interface VideoRequest {
 	files: UploadedImage[];
