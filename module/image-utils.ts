@@ -2,7 +2,9 @@
 
 const {Jimp, JimpMime} = require('jimp');
 
-const scaleToFit = (image, width, height) => {
+type JimpImage = Awaited<ReturnType<typeof Jimp.read>>;
+
+const scaleToFit = (image: JimpImage, width: number, height: number): JimpImage => {
 	const scale = Math.min(width / image.bitmap.width, height / image.bitmap.height);
 	return image.resize({
 		w: Math.round(image.bitmap.width * scale),
@@ -10,6 +12,4 @@ const scaleToFit = (image, width, height) => {
 	});
 };
 
-exports.Jimp = Jimp;
-exports.JimpMime = JimpMime;
-exports.scaleToFit = scaleToFit;
+export {Jimp, JimpMime, scaleToFit};

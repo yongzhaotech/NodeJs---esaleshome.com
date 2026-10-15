@@ -3,19 +3,28 @@
 const helper = require('./helper'),
 	sql = require('./sql-engine');
 	
-let sessionObject = require('./session-object');
-	
-const exist = (sessionId = null) => sessionId !== null && (sessionId in sessionObject);
+interface SessionEntry {
+	data: Record<string, unknown>;
+	time: number;
+}
 
-const create = (sessionId = null) => {
-		console.log(sessionObject);
+interface StoredSessionRow {
+	data: string;
+	time: number;
+}
+
+let sessionObject: Record<string, SessionEntry> = {};
+	
+const exist = (sessionId: string | null = null): boolean => sessionId !== null && (sessionId in sessionObject);
+
+const create = (sessionId: string | null = null): Promise<{sessionId: string}> => {
 
 	if(sessionId === null) {
 		const id = helper.uuid();
 		sessionObject = { ...sessionObject, ...{ [id]: { data: {}, time: Date.now() } } };
 
 		return new Promise((res, rej) => {
-			sql.handle.query('insert into nodesession (id, data, time) values (?, ?, ?)', [id, JSON.stringify(sessionObject[id].data), sessionObject[id].time], (error, result) => {
+			sql.handle.query('insert into nodesession (id, data, time) values (?, ?, ?)', [id, JSON.stringify(sessionObject[id].data), sessionObject[id].time], (error: Error | null) => {
 				if(error) {
 					delete sessionObject[id];
 					rej({error: error});
@@ -26,26 +35,26 @@ const create = (sessionId = null) => {
 		});
 	}else {
 		return new Promise((res, rej) => {
-			sql.handle.query('select * from nodesession where id = ?', [sessionId], (error, result) => {
+			sql.handle.query('select * from nodesession where id = ?', [sessionId], (error: Error | null, result: StoredSessionRow[]) => {
 				if(error) {
 					rej({error: error});
-				}else {
+				}else if(result[0]) {
 					sessionObject = { ...sessionObject, ...{ [sessionId]: { data: JSON.parse(result[0].data), time: result[0].time } } };
-					sessionObject.time = result[0].time;
-					sessionObject.data = JSON.parse(result[0].data);
 					res({sessionId: sessionId});
+				}else {
+					rej({error: new Error('Session not found')});
 				}
 			});
 		});
 	}
 };
 
-const set = (sessionId, hashObject) => {
+const set = (sessionId: string, hashObject: Record<string, unknown>): Promise<{ok: true}> => {
 	return new Promise((res, rej) => {
 		let staleData = sessionObject[sessionId].data,
 			newData = {...staleData, ...hashObject},
 			time = Date.now();
-		sql.handle.query('update nodesession set data = ?, time = ? where id = ?', [JSON.stringify(newData), time, sessionId], (error, result) => {
+		sql.handle.query('update nodesession set data = ?, time = ? where id = ?', [JSON.stringify(newData), time, sessionId], (error: Error | null) => {
 			if(error) {
 				rej({error: error});
 			}else {
@@ -57,12 +66,12 @@ const set = (sessionId, hashObject) => {
 	});
 };
 
-const get = (sessionId, key) => sessionObject[sessionId].data && sessionObject[sessionId].data[key] || null;
+const get = (sessionId: string, key: string): unknown => sessionObject[sessionId].data && sessionObject[sessionId].data[key] || null;
 
-const remove = (sessionId, items = null) => {
+const remove = (sessionId: string, items: string[] | null = null): Promise<{ok: true}> => {
 	return new Promise((res, rej) => {
 		if(items === null) {
-			sql.handle.query('delete from nodesession where id = ?', [sessionId], (error, result) => {
+			sql.handle.query('delete from nodesession where id = ?', [sessionId], (error: Error | null) => {
 				if(error) {
 					rej({error: error});
 				}else {
@@ -80,7 +89,7 @@ const remove = (sessionId, items = null) => {
 			});
 			if(dbAction) {
 				let time = Date.now();
-				sql.handle.query('update nodesession set data = ?, time = ? where id = ?', [JSON.stringify(sessionObject[sessionId].data), time, sessionId], (error, result) => {
+				sql.handle.query('update nodesession set data = ?, time = ? where id = ?', [JSON.stringify(sessionObject[sessionId].data), time, sessionId], (error: Error | null) => {
 					if(error) {
 						rej({error: error});
 					}else {
@@ -88,17 +97,19 @@ const remove = (sessionId, items = null) => {
 						res({ok: true});
 					}
 				});
+			}else {
+				res({ok: true});
 			}
 		}
 	});
 };
 
-const expire = sessionId => Date.now() - +sessionObject[sessionId].time > 1800000;
+const expire = (sessionId: string): boolean => Date.now() - sessionObject[sessionId].time > 1800000;
 
-const update = sessionId => {
+const update = (sessionId: string): Promise<{ok: true}> => {
 	let time = Date.now();
 	return new Promise((res, rej) => {
-		sql.handle.query('update nodesession set time = ? where id = ?', [time, sessionId], (error, result) => {
+		sql.handle.query('update nodesession set time = ? where id = ?', [time, sessionId], (error: Error | null) => {
 			if(error) {
 				rej({error: error});
 			}else {

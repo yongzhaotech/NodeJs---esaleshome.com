@@ -4,8 +4,18 @@ const fs = require('fs'),
 	ffmpeg = require('fluent-ffmpeg'),
 	config = require('./video-config');
 	
-const createVideo = (req, res) => {
-	Promise.all(config.processPhoto(req)).then(paths => {
+interface UploadedImage extends Express.Multer.File {}
+
+interface VideoRequest {
+	files: UploadedImage[];
+}
+
+interface VideoResponse {
+	send(body: Record<string, string>): unknown;
+}
+
+const createVideo = (req: VideoRequest, res: VideoResponse): void => {
+	Promise.all(config.processPhoto(req)).then((paths: string[]) => {
 		let mp4 = Date.now().toString(),
 			comman = ffmpeg();
 		comman
@@ -17,15 +27,15 @@ const createVideo = (req, res) => {
 			.noAudio()
 			.on('end', () => {
 				paths.forEach(path => {
-					fs.unlink(path, (error) => {});
+					fs.unlink(path, (_error: NodeJS.ErrnoException | null) => {});
 				});
 				res.send({mPegFour: `${mp4}.mp4`});
 			})
-			.on('error', err => {})
+			.on('error', () => {})
 			.run();		
 	}).catch((e) => {
 		res.send({error: 'Something wrong, e.g. no image selected, etc.'});
 	});
 };
 
-exports.createVideo = createVideo;
+export {createVideo};

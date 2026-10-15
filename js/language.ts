@@ -1,4 +1,6 @@
-const LANG_LABELS = {
+type LanguageLabels = Record<string, Record<'en' | 'cn', string>>;
+
+const LANG_LABELS: LanguageLabels = {
 	r_contact_name: {
 		en: "contact name is not entered",
 		cn: "联系姓名没有填写"
@@ -595,10 +597,6 @@ const LANG_LABELS = {
 		en: "Create a new account",
 		cn: "新建帐户"
 	},
-	c_sign_in: {
-		en: "Sign In",
-		cn: "登陆"
-	},
 	c_cancel: {
 		en: "Cancel",
 		cn: "取消"
@@ -911,6 +909,11 @@ const LANG_LABELS = {
 		en: "To page",
 		cn: "跳至页面"
 	}
+};
+
+LANG_LABELS.c_sign_in = {
+	en: "Sign In",
+	cn: "登陆"
 };
 
 exports.label = () => LANG_LABELS;
