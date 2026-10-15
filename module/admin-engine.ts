@@ -1,18 +1,39 @@
 'use strict';
 
+import type { Request, Response } from 'express';
+
+type DatabaseRow = Record<string, any>;
+
+interface QueryResponse {
+	data?: DatabaseRow[];
+	ok?: number;
+	error?: string[];
+}
+
+interface SiteConfig {
+	page_size: number;
+}
+
+interface AdminSqlEngine {
+	executeQuery(...args: any[]): Promise<QueryResponse>;
+	handle: {
+		query(stmt: string, callback: (error: Error | null, dataSet: DatabaseRow[]) => void): void;
+	};
+}
+
 const LANG_LABELS = require('../js/language').label(),
 	content = require('../js/static-content'),
 	fs = require('fs'),
 	directory = '../server/js',
 	siteMap = '../server/file/sitemap.txt',
-	config = require('./ad-config'),
+	config: { deleteAdvertise(id: unknown): Promise<unknown> } = require('./ad-config'),
 	helper = require('./helper'),
-	sql = require('./sql-engine');
+	sql: AdminSqlEngine = require('./sql-engine');
 
-const adminFunction = (req, res) => {
+const adminFunction = (req: Request, res: Response) => {
 	let action = req.body.action || req.body.admin_action,
 		start = req.body.start || 0,
-		size = content.get('site_config').page_size,
+		size = (content.get('site_config') as SiteConfig).page_size,
 		lang = req.cookies.lang;
 
 	if(action === 'set_permission') {
@@ -43,7 +64,7 @@ const adminFunction = (req, res) => {
 			let users = promise.data || null;
 			if(users) {
 				sql.executeQuery('select', `select count(id) as 'total' from user`).then(promise => {
-					res.send({users: users, pages: helper.calculatePages(start, promise.data[0].total)});
+					res.send({users: users, pages: helper.calculatePages(start, promise.data![0].total)});
 				}).catch(() => {
 					res.send({error: LANG_LABELS.unknown_error[lang]});
 				});
@@ -68,7 +89,7 @@ const adminFunction = (req, res) => {
 			let ads = promise.data || [];
 			if(ads.length) {
 				sql.executeQuery('select', count_stmt).then(promise => {
-					res.send({ads: ads, pages: helper.calculatePages(start, promise.data[0].total)});
+					res.send({ads: ads, pages: helper.calculatePages(start, promise.data![0].total)});
 				}).catch(() => {
 					res.send({error: LANG_LABELS.unknown_error[lang]});
 				});
@@ -79,13 +100,13 @@ const adminFunction = (req, res) => {
 			res.send({error: LANG_LABELS.unknown_error[lang]});
 		});
 	}else if(action === 'fetch_adm_visitor_hits') {
-		let response = {},
+		let response: Record<string, any> = {},
 			cnt_stmt = `select count(distinct ip) as 'total' from visitor_hits`,
 			stmt = `select count(ip) as 'count',ip,cast(max(create_time) as char) as 'create_time',cast(current_date as char) as 'this_day' from visitor_hits group by ip order by create_time desc,count desc limit ${start}, ${size}`;
 		sql.executeQuery('select', stmt).then(promise => {
 			response.hits = promise.data || [];
 			sql.executeQuery('select', cnt_stmt).then(promise => {
-				response.pages = helper.calculatePages(start, promise.data[0].total);
+				response.pages = helper.calculatePages(start, promise.data![0].total);
 				res.send(response);
 			}).catch(() => {
 				res.send({error: LANG_LABELS.unknown_error[lang]});
@@ -107,12 +128,12 @@ const adminFunction = (req, res) => {
 			res.send({error: LANG_LABELS.unknown_error[lang]});
 		});
 	}else if(action === 'fetch_adm_subcategories') {
-		let response = {};
+		let response: Record<string, any> = {};
 		sql.executeQuery('select', 'select * from category order by name').then(promise => {
 			let categories = (promise.data || []).map(cat => ({ id: cat.id, name: cat.name, name_cn: cat.name_cn }));
 			response.categories = categories;
 			sql.executeQuery('select', 'select * from item order by name').then(promise => {
-				let items = (promise.data || []).reduce((current, next) => {
+				let items = (promise.data || []).reduce((current: Record<string, DatabaseRow[]>, next) => {
 					if(!(next.category_id in current)) {
 						current[next.category_id] = [];
 					}
@@ -122,7 +143,7 @@ const adminFunction = (req, res) => {
 				response.items = items;
 				response.default_category_id = categories[0].id;
 				
-				let hash = {category: {}};
+				let hash: {category: Record<string, DatabaseRow[]>} = {category: {}};
 				Object.keys(items).forEach(c_id => {
 					hash.category[c_id] = [];
 					items[c_id].forEach($_ => {
@@ -154,25 +175,25 @@ const adminFunction = (req, res) => {
  	}
 };
 
-const generateStaticContent = (req, res) => {
+const generateStaticContent = (req: Request, res: Response) => {
 	let langLabels = {...LANG_LABELS},
-		$categories = {},
-		$items = {},
-		$all_items = {},
-		$$categories = [],
-		$states = {},
-		$provinces = {}, 
-		$countries = {}, 
-		$cities = {},
-		$all_cities = {}, 
-		$$provinces = [],
-		$content,
+		$categories: Record<string, DatabaseRow> = {},
+		$items: Record<string, DatabaseRow[]> = {},
+		$all_items: Record<string, DatabaseRow> = {},
+		$$categories: DatabaseRow[] = [],
+		$states: Record<string, DatabaseRow> = {},
+		$provinces: Record<string, DatabaseRow> = {},
+		$countries: Record<string, DatabaseRow[]> = {},
+		$cities: Record<string, DatabaseRow[]> = {},
+		$all_cities: Record<string, DatabaseRow> = {},
+		$$provinces: DatabaseRow[] = [],
+		$content: string,
 		$js = `const LangMessages=${JSON.stringify(langLabels)};` + `\n` + `export { LangMessages };`,
 		$stmt;
 
 	$content = `'use strict';\nconst content = {\n`;
 
-	fs.writeFile(`${directory}/langs.js`, $js, error => {
+	fs.writeFile(`${directory}/langs.js`, $js, (error: NodeJS.ErrnoException | null) => {
 		if(error) {
 			res.send({error: error});
 		}
@@ -204,7 +225,7 @@ const generateStaticContent = (req, res) => {
 				$items[$_].unshift({ id: '', name_en: 'sub categories under ' + $categories[$_].name_en, name_cn: $categories[$_].name_cn + '分类' });
 			});
 
-			$$categories = Object.keys($categories).sort((a, b) => a - b).map($_ => ({ id: $_, name_en: $categories[$_].name_en, name_cn: $categories[$_].name_cn }));
+			$$categories = Object.keys($categories).sort((a, b) => Number(a) - Number(b)).map($_ => ({ id: $_, name_en: $categories[$_].name_en, name_cn: $categories[$_].name_cn }));
 			$$categories.unshift({ id: '', name_en: 'Category', name_cn: '总类' });
 
 			$$categories.forEach($cat_ref => {
@@ -264,8 +285,8 @@ const generateStaticContent = (req, res) => {
 
 
 				$$provinces = [{ id: '', name_en: 'Province / State', name_cn: '加拿大省或美国州' }];
-				Object.keys($countries).sort((a, b) => a - b).forEach($country => {
-					let $$arr = $countries[$country].sort((a, b) => a.name_en - b.name_en);
+				Object.keys($countries).sort((a, b) => Number(a) - Number(b)).forEach($country => {
+					let $$arr = $countries[$country].sort((a, b) => Number(a.name_en) - Number(b.name_en));
 					$$provinces = [...$$provinces, ...$$arr];
 				});
 
@@ -292,7 +313,7 @@ const generateStaticContent = (req, res) => {
 				$js += "\n";
 				$js += "export {page_vars as PageVars, static_vars as StaticVars};";
 
-				fs.writeFile(`${directory}/static-vars.js`, $js, error => {
+				fs.writeFile(`${directory}/static-vars.js`, $js, (error: NodeJS.ErrnoException | null) => {
 					if(error) {
 						res.send({error: error});
 					}
@@ -311,14 +332,14 @@ const generateStaticContent = (req, res) => {
 								res.send({error: error});
 							}
 
-							let $auth = {};							
+							let $auth: Record<string, DatabaseRow> = {};
 							resultSet.forEach($_ => {
 								$auth[$_.page] = $_;
 							});
 							$content += `\tsite_authenticate: ${JSON.stringify($auth)}\n`;
 							$content += `};\nexports.get = key => content[key] || null;`
 
-							fs.writeFile(`${directory}/static-content.js`, $content, error => {
+							fs.writeFile(`${directory}/static-content.js`, $content, (error: NodeJS.ErrnoException | null) => {
 								if(error) {
 									res.send({error: error});
 								}
@@ -333,11 +354,11 @@ const generateStaticContent = (req, res) => {
 	});
 };
 
-const generateHtmls = (req, res) => {
+const generateHtmls = (req: Request, res: Response) => {
 	sql.executeQuery('select', 'select id from advertise').then(promise => {
 		let idsArray = promise.data || [],
 			htmls = idsArray.map(idObject => `http://esaleshome.com/ads/ad-detail/${idObject.id}`);
-			fs.writeFile(siteMap, htmls.join('\n'), error => {
+			fs.writeFile(siteMap, htmls.join('\n'), (error: NodeJS.ErrnoException | null) => {
 			if(error) {
 				res.send({error: 'error'});
 			}else {
