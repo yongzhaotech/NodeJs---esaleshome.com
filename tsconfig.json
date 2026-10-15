@@ -15,7 +15,7 @@
     "types": ["node"]
   },
   "include": [
-    "service.js",
+    "service.ts",
     "js/**/*.js",
     "module/**/*.js",
     "module/**/*.ts"

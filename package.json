@@ -2,7 +2,7 @@
   "name": "server",
   "version": "1.0.0",
   "description": "node server for React",
-  "main": "service.js",
+  "main": "dist/service.js",
   "engines": {
     "node": ">=20"
   },
