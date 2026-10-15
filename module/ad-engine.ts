@@ -1,19 +1,59 @@
 'use strict';
 
-const LANG_LABELS = require('../js/language').label(),
-	config = require('./ad-config'),
-	sql = require('./sql-engine'),
-	helper = require('./helper'),
-	content = require('../js/static-content'),
-	session = require('./session');
+import type { Request, Response } from 'express';
 
-const processAdvertise = ad => {
+type DatabaseRow = Record<string, any>;
+
+interface SqlResult {
+	data?: DatabaseRow[];
+	error?: unknown;
+	key?: number | null;
+	ok?: number;
+}
+
+interface AdSqlEngine {
+	handle: {
+		query(stmt: string, bind: unknown[], callback: (error: Error | null, rows: DatabaseRow[]) => void): void;
+	};
+	executeQuery(...args: any[]): Promise<SqlResult>;
+	executeStmt(...args: any[]): Promise<SqlResult>;
+}
+
+interface AdConfig {
+	processPhoto(...args: any[]): Promise<number>[];
+	deletePhoto(...args: any[]): Promise<unknown>;
+}
+
+interface AdSession {
+	exist(sessionId: string | undefined): boolean;
+	get(sessionId: string, key: string): unknown;
+	remove(sessionId: string | undefined, keys?: string[]): Promise<unknown>;
+}
+
+interface AdUser extends DatabaseRow {
+	id: number | string;
+}
+
+interface VisitorSession extends DatabaseRow {
+	v_ad_id: number | string;
+	v_user_id: number | string;
+	v_post_id: string;
+}
+
+const LANG_LABELS = require('../js/language').label(),
+	config: AdConfig = require('./ad-config'),
+	sql: AdSqlEngine = require('./sql-engine'),
+	helper = require('./helper'),
+	content: { get(key: string): any } = require('../js/static-content'),
+	session: AdSession = require('./session');
+
+const processAdvertise = (ad: Record<string, any>): void => {
 	if(ad.picture_ids === null) {
 		ad.picture_id = 0;
 		ad.picture_ids = [];
 		ad.main_picture_id = '';
 	}else {
-		let pictures = {},
+		let pictures: Record<string, string> = {},
 			mainPictureId = null,
 			pictureInfo = ('' + ad.picture_ids).split(',');
 
@@ -25,7 +65,7 @@ const processAdvertise = ad => {
 			pictures[id] = editTime;
 		});
 
-		let picturesArr = Object.keys(pictures).sort((a, b) => b - a);
+		let picturesArr = Object.keys(pictures).sort((a, b) => Number(b) - Number(a));
 
 		if(!mainPictureId) {
 			mainPictureId = picturesArr[0];
@@ -48,7 +88,7 @@ const processAdvertise = ad => {
 	if(ad.description) { ad.description = ad.description.toString(); }	
 };
 	
-const detail = (req, res) => {	
+const detail = (req: Request, res: Response) => {
 	let {advertise_id: advertiseId} = req.body;
 
 	sql.handle.query('select * from advertise where id = ?', [advertiseId], (error, ads) => {
@@ -61,8 +101,8 @@ const detail = (req, res) => {
 		if(!advertise) {
 			res.send({error: LANG_LABELS.no_sch_result[req.cookies.lang]});
 		}else {
-			let json = {},
-				terms = [],
+			let json: Record<string, any> = {},
+				terms: DatabaseRow[] = [],
 				desc = advertise.description.toString();
 			json.location = !!advertise.address ? {en: advertise.address, cn: advertise.address} : {en: LANG_LABELS.no_addr.en, cn: LANG_LABELS.no_addr.cn};
 			json.ad_description = !helper.isNothing(desc) ? {en: desc, cn: desc} : {en: LANG_LABELS.r_no_description.en, cn: LANG_LABELS.r_no_description.cn};
@@ -99,7 +139,7 @@ const detail = (req, res) => {
 					res.send({error: error});
 				}
 				
-				let pictures = [],
+				let pictures: DatabaseRow[] = [],
 					main_pict = null;
 
 				pictureSet.forEach($_ => {
@@ -123,18 +163,18 @@ const detail = (req, res) => {
 	});
 };
 
-const search = (req, res) => {
+const search = (req: Request, res: Response) => {
 	let [keyword, category, item, province,	city, start] = [req.body.ad_keyword || '', req.body.category || '', req.body.item || '', req.body.province || '', req.body.city || '', req.body.start || ''], 
-		ads = [],
+		ads: DatabaseRow[] = [],
     	criteria = '',
-    	clauseObj = {}, 
-    	clauseArr  = [],
-    	bind = [], 
-    	terms = [], 
+		clauseObj: Record<string, unknown> = {},
+		clauseArr: string[] = [],
+		bind: unknown[] = [],
+		terms: DatabaseRow[] = [],
     	keywords = '',
 		stmt,
 		countStmt,
-		response = {};
+		response: Record<string, any> = {};
 	start = start || 0;
 
 	let searchRange = `limit ${start},${content.get('site_config').page_size}`;
@@ -237,9 +277,9 @@ const search = (req, res) => {
 	});
 };
 
-const lists = (req, res) => {
+const lists = (req: Request, res: Response) => {
 	let start = req.body.start || 0,
-		bind = [1],
+		bind: unknown[] = [1],
 		stmt,
 		countStmt;
 
@@ -263,7 +303,7 @@ const lists = (req, res) => {
 		if(error) {
 			res.send({error: error});
 		}else {
-			let advertises = [];
+			let advertises: DatabaseRow[] = [];
 			
 			ads.forEach(ad => {
 				processAdvertise(ad);
@@ -291,7 +331,7 @@ const lists = (req, res) => {
 	});
 };
 
-const postAdvertise = (req, res) => {
+const postAdvertise = (req: Request, res: Response) => {
 	let categoryId = +req.body.category,
 		itemId	= +req.body.item,
 		name = (req.body.ad_name || '').trim(),
@@ -308,7 +348,7 @@ const postAdvertise = (req, res) => {
 		city = +req.body.city,
 		lang = req.cookies.lang,
 		error = [],
-		user = session.exist(req.cookies.session_id) && session.get(req.cookies.session_id, 'user') || null;
+		user = (session.exist(req.cookies.session_id) && session.get(req.cookies.session_id!, 'user') as AdUser) || null;
 
 	if(!categoryId) {
 		error.push(LANG_LABELS.r_category[lang]);
@@ -356,7 +396,7 @@ const postAdvertise = (req, res) => {
 			Promise.all(success).then(p => {
 				let msgs = [`[ ${name} ] ${LANG_LABELS.ad_added[lang]}!`];
 				if(postId) {
-					let info = {};
+					let info: Record<string, string> = {};
 					if(phone) { info.phone = phone; }
 					if(email) { info.email = email; }
 					msgs.push(`${LANG_LABELS.remember[lang]}:`);
@@ -375,7 +415,7 @@ const postAdvertise = (req, res) => {
 	});
 };
 
-const EditAdvertise = (req, res) => {
+const EditAdvertise = (req: Request, res: Response) => {
 	let id			= +req.body.advertise_id,
 		category_id = +req.body.category,
 		item_id		= +req.body.item,
@@ -393,7 +433,7 @@ const EditAdvertise = (req, res) => {
 		city		= +req.body.city,
 		lang		= req.cookies.lang,
 		error		= [],
-		user		= session.exist(req.cookies.session_id) && session.get(req.cookies.session_id, 'user') || null;
+		user: AdUser | null = (session.exist(req.cookies.session_id) && session.get(req.cookies.session_id!, 'user') as AdUser) || null;
 
 	if(!category_id) {
 		error.push(LANG_LABELS.r_category[lang]);
@@ -426,7 +466,7 @@ const EditAdvertise = (req, res) => {
 		return;
 	}
 	
-	config.deletePhoto(req, id, user).then(success => {
+	config.deletePhoto(req, id, user!).then(success => {
 		let advertise = {
 			category_id: category_id,
 			item_id: item_id,
@@ -442,7 +482,7 @@ const EditAdvertise = (req, res) => {
 			city_id: city,
 			province_id: province
 		};
-		sql.executeQuery('update', 'advertise', { id: id, user_id: user.id }, advertise).then(success => {
+		sql.executeQuery('update', 'advertise', { id: id, user_id: user!.id }, advertise).then(success => {
 			Promise.all(config.processPhoto(req, id, main_pict)).then(p => {
 				res.send({message: LANG_LABELS.c_ad_edit_ok[lang], load: id});
 			}).catch(() => {
@@ -456,12 +496,12 @@ const EditAdvertise = (req, res) => {
 	});
 };
 
-const EditVisitorAdvertise = (req, res) => {
+const EditVisitorAdvertise = (req: Request, res: Response) => {
 	let lang = req.cookies.lang,
-		visitor = session.exist(req.cookies.session_id) && session.get(req.cookies.session_id, 'visitor') || null;
+		visitor = (session.exist(req.cookies.session_id) && session.get(req.cookies.session_id!, 'visitor') as VisitorSession) || null;
 
 	if(!visitor) {
-		res.send({error: LANG_LABELS.visitor_in_err[lang]});
+		return res.send({error: LANG_LABELS.visitor_in_err[lang]});
 	}
 	
 	let id			= visitor.v_ad_id,
@@ -534,7 +574,7 @@ const EditVisitorAdvertise = (req, res) => {
 		sql.executeQuery('update', 'advertise', { id: id, user_id: uid }, advertise).then(success => {
 			Promise.all(config.processPhoto(req, id, main_pict)).then(p => {
 				let msgs = [`[ ${name} ] ${LANG_LABELS.ad_updated[lang]}!`],
-					info = {};
+					info: Record<string, string> = {};
 				if(phone) { info.phone = phone; }
 				if(email) { info.email = email; }
 				msgs.push(`${LANG_LABELS.remember[lang]}:`);
