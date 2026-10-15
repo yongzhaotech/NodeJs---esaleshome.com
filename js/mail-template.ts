@@ -137,4 +137,6 @@ const mails = {
 `
 };
 
-exports.get = key => mails[key] || 'No contents';
+const get = (key: string): string => mails[key as keyof typeof mails] || 'No contents';
+
+export {get};
