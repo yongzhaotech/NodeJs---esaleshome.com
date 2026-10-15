@@ -1,3 +1,5 @@
+export {};
+
 type LanguageLabels = Record<string, Record<'en' | 'cn', string>>;
 
 const LANG_LABELS: LanguageLabels = {

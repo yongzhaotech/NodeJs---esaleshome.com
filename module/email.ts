@@ -1,6 +1,33 @@
 'use strict';
 
-let _mail = {},
+export {};
+
+interface SiteConfig {
+	info_email: string;
+}
+
+interface MailBody {
+	subject: string | undefined;
+	from: string;
+	to: string | undefined;
+	html: string | undefined;
+	replyTo?: string;
+}
+
+interface MailState {
+	subject?: string;
+	replyTo?: string | null;
+	to?: string;
+	text?: string;
+	html?: string;
+}
+
+interface MailResponse {
+	success?: true;
+	error?: string;
+}
+
+let _mail: MailState = {},
 	_time = null,
 	_boundary = null,
 	options = {
@@ -38,38 +65,38 @@ KWfyTL93DDHe6BrJoPQ++aQlZ0jvYzKWjQPV5+qq4+1H
 	content = require('../js/static-content'),
 	LANG_LABELS = require('../js/language').label();
 	
-const subject = arg => {
+const subject = (arg: string) => {
 	_mail.subject = arg || 'No Subject';
 };
 
-const replyTo = arg => {
+const replyTo = (arg: string | null) => {
 	_mail.replyTo = arg || null;
 }
 
-const to = arg => {
+const to = (arg: string) => {
 	_mail.to = _mail.to ? `{_mail.to},${arg}` : arg;
 };
 
-const text = arg => {
+const text = (arg: string) => {
 	_mail.text = arg;
 };
 
-const html = arg => {
+const html = (arg: string) => {
 	_mail.html = arg;
 };
 
-const send = () => {
-	const body = {
+const send = (): Promise<MailResponse> => {
+	const body: MailBody = {
 		subject: _mail.subject,
-		from: content.get('site_config').info_email,
+		from: (content.get('site_config') as SiteConfig).info_email,
 		to: _mail.to,
 		html: _mail.html
 	};
 	if(_mail.replyTo) {
 		body['replyTo'] = _mail.replyTo
 	}
-	return new Promise((res, rej) => {
-		transporter.sendMail(body, (error, success) => {
+	return new Promise<MailResponse>(res => {
+		transporter.sendMail(body, (error: Error | null) => {
 			if(error) {
 				res({error: LANG_LABELS.unknown_error['cn']});
 			}else {
