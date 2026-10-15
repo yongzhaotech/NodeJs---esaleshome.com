@@ -1,5 +1,20 @@
 'use strict';
 
+import type { Request, Response } from 'express';
+
+interface QueryResponse {
+	data?: Record<string, any>[];
+}
+
+interface MailResponse {
+	success?: boolean;
+	error?: string;
+}
+
+interface SessionResponse {
+	sessionId: string;
+}
+
 const LANG_LABELS = require('../js/language').label(), 
 	session = require('./session'),
 	mail = require('./email'),
@@ -8,7 +23,7 @@ const LANG_LABELS = require('../js/language').label(),
 	content = require('../js/static-content'),
 	template = require('../js/mail-template');
 
-const request = (req, res) => {
+const request = (req: Request, res: Response): void => {
 	const action = req.body.action || req.body.f_action,
 		error = [],
 		lang = req.cookies.lang;
@@ -43,7 +58,7 @@ const request = (req, res) => {
 			mail.replyTo(email);
 			mail.to(content.get('site_config').admin_email);
 			mail.html(message);
-			mail.send().then(response => {
+			mail.send().then((response: MailResponse) => {
 				res.send(response.success ? {message: LANG_LABELS.contact_sent[lang]} : {error: response.error || LANG_LABELS.unknown_error[lang]});
 			}).catch(() => {
 				res.send({error: LANG_LABELS.unknown_error[lang]});
@@ -71,7 +86,7 @@ const request = (req, res) => {
 			res.send({error: error});
 		}
 
-		sql.executeQuery('select', 'advertise', { id: aid }, ['html','currency','name','price','create_time','now() as today']).then(promise => {
+		sql.executeQuery('select', 'advertise', { id: aid }, ['html','currency','name','price','create_time','now() as today']).then((promise: QueryResponse) => {
 			let ad = (promise.data && promise.data[0]) || null;
 
 			if(!ad) {
@@ -89,13 +104,13 @@ const request = (req, res) => {
 					price: ad.currency ? LANG_LABELS[`currency_${ad.currency}`][lang] + helper.dollarValue(ad.price) : LANG_LABELS.c_free_offer[lang],
 					today: ad.today
 				}));
-				mail.send().then(response => {
+				mail.send().then((response: MailResponse) => {
 					res.send(response.success ? {message: `${LANG_LABELS.link_sent[lang]} ${friend}`} : {error: response.error || LANG_LABELS.unknown_error[lang]});
-				}).catch((e) => {console.log(e);
+				}).catch((e: unknown) => {console.log(e);
 					res.send({error: LANG_LABELS.unknown_error[lang]});
 				});
 			}
-		}).catch((e) => {console.log(e);
+		}).catch((e: unknown) => {console.log(e);
 			res.send({error: LANG_LABELS.unknown_error[lang]});
 		});
 	}else if(action === 'ask_poster') {
@@ -116,17 +131,17 @@ const request = (req, res) => {
 			res.send({error: error});
 		}
 
-		sql.executeQuery('select', 'advertise', { id: id }, ['html','currency','name','user_id','price','contact_method','contact_email','create_time','now() as today']).then(promise => {
+		sql.executeQuery('select', 'advertise', { id: id }, ['html','currency','name','user_id','price','contact_method','contact_email','create_time','now() as today']).then((promise: QueryResponse) => {
 			let ad = (promise.data && promise.data[0]) || null;
 				
 			if(!ad) {
-				res.send({error: LANG_LABELS.no_ad_found[lang]});
+				return res.send({error: LANG_LABELS.no_ad_found[lang]});
 			}
 
-			sql.executeQuery('select', 'user', { id: ad.user_id }, ['first_name','last_name','email']).then(promise => {
+			sql.executeQuery('select', 'user', { id: ad.user_id }, ['first_name','last_name','email']).then((promise: QueryResponse) => {
 				let user = (promise.data && promise.data[0]) || null;
 				if(!user) {
-					res.send({error: LANG_LABELS.unknown_error[lang]});
+					return res.send({error: LANG_LABELS.unknown_error[lang]});
 				}
 
 				let title = ad.contact_method.match(/\bemail\b/) ? LANG_LABELS.buddy[lang] : (lang === 'en' ? `${user.first_name} ${user.last_name}` : `${user.last_name} ${user.first_name}`),
@@ -147,7 +162,7 @@ const request = (req, res) => {
 					domain: content.get('site_config').domain,
 					today: ad.today
 				}));
-				mail.send().then(response => {
+				mail.send().then((response: MailResponse) => {
 					res.send(response.success ? {message: LANG_LABELS.msg_sent_to_seller[lang]} : {error: response.error || LANG_LABELS.unknown_error[lang]});
 				}).catch(() => {
 					res.send({error: LANG_LABELS.unknown_error[lang]});
@@ -166,7 +181,7 @@ const request = (req, res) => {
 			accCode = accCode.replace(/(:?cn|en)$/, '');
 		}
 		if(accCode) {
-			sql.executeQuery('select', 'user', { acc_code: accCode }).then(promise => {
+			sql.executeQuery('select', 'user', { acc_code: accCode }).then((promise: QueryResponse) => {
 				let user = (promise.data && promise.data[0]) || null;
 				if(user) {
 					res.send({ok: 1, lang: lang});
@@ -183,11 +198,11 @@ const request = (req, res) => {
 		const emailPhone = (req.body.email_phone || '').toLowerCase(),
 			postId = (req.body.post_id || '').trim();
 			
-		sql.executeQuery('select id, user_id from advertise where post_id=? and (contact_phone=? or contact_email=?)', [postId, emailPhone, emailPhone]).then(promise => {
+		sql.executeQuery('select id, user_id from advertise where post_id=? and (contact_phone=? or contact_email=?)', [postId, emailPhone, emailPhone]).then((promise: QueryResponse) => {
 			let ad = (promise.data && promise.data[0]) || null;
 			if(ad) {
 				let [id, uid] = [ad.id, ad.user_id];
-				session.create(req.cookies.session_id || null).then(promise => {
+				session.create(req.cookies.session_id || null).then((promise: SessionResponse) => {
 					session.set(promise.sessionId, {visitor: {v_ad_id: id, v_user_id: uid, v_post_id: postId}}).then(() => {
 					res.cookie('session_id', promise.sessionId);
 						res.send({ok: 1});						
