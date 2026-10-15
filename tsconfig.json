@@ -17,6 +17,7 @@
   "include": [
     "service.ts",
     "js/**/*.js",
+    "js/**/*.ts",
     "module/**/*.js",
     "module/**/*.ts"
   ],
