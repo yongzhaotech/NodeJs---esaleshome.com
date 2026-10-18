@@ -98,7 +98,7 @@ const send = (): Promise<MailResponse> => {
 	return new Promise<MailResponse>(res => {
 		transporter.sendMail(body, (error: Error | null) => {
 			if(error) {
-				res({error: LANG_LABELS.unknown_error['cn']});
+				res({error: 'SMTP connection error: ' + error.message});
 			}else {
 				res({success: true});
 			}
