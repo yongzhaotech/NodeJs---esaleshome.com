@@ -1,23 +1,10 @@
 'use strict';
 
 import type { Request, Response } from 'express';
+import type { QueryValues } from 'mysql2';
+import { mysql as sql } from '../utils';
 
 type DatabaseRow = Record<string, any>;
-
-interface SqlResult {
-	data?: DatabaseRow[];
-	error?: unknown;
-	key?: number | null;
-	ok?: number;
-}
-
-interface AdSqlEngine {
-	handle: {
-		query(stmt: string, bind: unknown[], callback: (error: Error | null, rows: DatabaseRow[]) => void): void;
-	};
-	executeQuery(...args: any[]): Promise<SqlResult>;
-	executeStmt(...args: any[]): Promise<SqlResult>;
-}
 
 interface AdConfig {
 	processPhoto(...args: any[]): Promise<number>[];
@@ -42,7 +29,6 @@ interface VisitorSession extends DatabaseRow {
 
 const LANG_LABELS = require('../js/language').label(),
 	config: AdConfig = require('./ad-config'),
-	sql: AdSqlEngine = require('./sql-engine'),
 	helper = require('./helper'),
 	content: { get(key: string): any } = require('../js/static-content'),
 	session: AdSession = require('./session');
@@ -167,9 +153,9 @@ const search = (req: Request, res: Response) => {
 	let [keyword, category, item, province,	city, start] = [req.body.ad_keyword || '', req.body.category || '', req.body.item || '', req.body.province || '', req.body.city || '', req.body.start || ''], 
 		ads: DatabaseRow[] = [],
     	criteria = '',
-		clauseObj: Record<string, unknown> = {},
+		clauseObj: Record<string, QueryValues> = {},
 		clauseArr: string[] = [],
-		bind: unknown[] = [],
+		bind: QueryValues[] = [],
 		terms: DatabaseRow[] = [],
     	keywords = '',
 		stmt,
@@ -465,8 +451,11 @@ const EditAdvertise = (req: Request, res: Response) => {
 		res.send({error: error});
 		return;
 	}
+	if(!user) {
+		return res.send({error: LANG_LABELS.unknown_error[lang]});
+	}
 	
-	config.deletePhoto(req, id, user!).then(success => {
+	config.deletePhoto(req, id, user).then(success => {
 		let advertise = {
 			category_id: category_id,
 			item_id: item_id,
@@ -482,7 +471,7 @@ const EditAdvertise = (req: Request, res: Response) => {
 			city_id: city,
 			province_id: province
 		};
-		sql.executeQuery('update', 'advertise', { id: id, user_id: user!.id }, advertise).then(success => {
+		sql.executeQuery('update', 'advertise', { id: id, user_id: user.id }, advertise).then(success => {
 			Promise.all(config.processPhoto(req, id, main_pict)).then(p => {
 				res.send({message: LANG_LABELS.c_ad_edit_ok[lang], load: id});
 			}).catch(() => {

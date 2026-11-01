@@ -1,7 +1,8 @@
 'use strict';
 
-const helper = require('./helper'),
-	sql = require('./sql-engine');
+import { mysql as sql } from '../utils';
+
+const helper = require('./helper');
 	
 interface SessionEntry {
 	data: Record<string, unknown>;

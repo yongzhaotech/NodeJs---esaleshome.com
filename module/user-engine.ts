@@ -1,13 +1,15 @@
 'use strict';
 
 import type { Request, Response } from 'express';
+import type { QueryValues } from 'mysql2';
+import { mysql as sql } from '../utils';
 
 type DatabaseRow = Record<string, any>;
 
 interface QueryResponse {
 	data?: DatabaseRow[];
 	ok?: number;
-	error?: string[];
+	error?: unknown;
 }
 
 interface UserSession extends DatabaseRow {
@@ -27,11 +29,6 @@ interface VisitorSession {
 
 interface SessionResponse {
 	sessionId: string;
-}
-
-interface SqlEngine {
-	executeQuery(...args: any[]): Promise<QueryResponse>;
-	executeStmt(...args: any[]): Promise<QueryResponse>;
 }
 
 interface SessionEngine {
@@ -63,7 +60,6 @@ const LANG_LABELS = require('../js/language').label(),
 	helper = require('./helper'),
 	config: { deleteAdvertise(id: unknown): Promise<unknown> } = require('./ad-config'),
 	mail: MailEngine = require('./email'),
-	sql: SqlEngine = require('./sql-engine'),
 	advertise = require('./ad-engine'),
 	content = require('../js/static-content'),
 	template = require('../js/mail-template');
@@ -73,7 +69,7 @@ const confidentialize = (user: UserSession): void => {
 	delete user.last_sign_in;
 };
 	
-const userAdvertiseDetail = (req: Request, res: Response, bind: unknown[]) => {
+const userAdvertiseDetail = (req: Request, res: Response, bind: QueryValues[]) => {
 	const lang = req.cookies.lang;
 	const sqlStmt = `select a.id as 'id',a.name as 'name',a.html as 'html',a.address as 'address',a.description as 'description',a.is_free,a.currency,a.price,a.contact_method as 'contact_method',a.contact_email as 'contact_email',a.contact_phone as 'contact_phone',a.city_id as 'city_id',a.province_id as 'province_id',cast(date(a.create_time) as char) as 'create_date',a.item_id as 'item_id',a.category_id as 'category_id',a.viewed as 'viewed',p.ids as 'picture_ids'
 			from advertise a left outer join (

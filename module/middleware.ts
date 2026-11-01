@@ -1,10 +1,10 @@
 'use strict';
 import type { NextFunction, Request, Response } from 'express';
+import { mysql as sql } from '../utils';
 
 const LANG_LABELS = require('../js/language').label(),
 	content = require('../js/static-content'),
 	session = require('./session'),
-	sql = require('./sql-engine'),
 	origins = {
 		'http://www.esaleshome.com': true,
 		'http://esaleshome.com': true,
