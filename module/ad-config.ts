@@ -1,10 +1,9 @@
 'use strict';
 import type { Request } from 'express';
 import type { FileFilterCallback } from 'multer';
-import type { RowDataPacket } from 'mysql2';
+import { mysql as sql } from '../utils';
 
-const sql = require('./sql-engine'),
-	path = require('path'),
+const path = require('path'),
 	fs = require('fs'),
 	{ Jimp, JimpMime, scaleToFit } = require('./image-utils');
 
@@ -22,12 +21,8 @@ interface PhotoOwner {
 	v_user_id?: string | number;
 }
 
-interface PictureRow extends RowDataPacket {
-	id: number | string;
-}
-
 interface DatabaseFetch {
-	data?: PictureRow[];
+	data?: Record<string, any>[];
 	error?: unknown;
 }
 

@@ -1,9 +1,11 @@
 'use strict';
 
 import type { Request, Response } from 'express';
+import { mysql as sql } from '../utils';
 
 interface QueryResponse {
 	data?: Record<string, any>[];
+	error?: unknown;
 }
 
 interface MailResponse {
@@ -19,7 +21,6 @@ const LANG_LABELS = require('../js/language').label(),
 	session = require('./session'),
 	mail = require('./email'),
 	helper = require('./helper'),
-	sql = require('./sql-engine'),
 	content = require('../js/static-content'),
 	template = require('../js/mail-template');
 

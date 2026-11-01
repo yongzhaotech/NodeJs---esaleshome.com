@@ -1,24 +1,12 @@
 'use strict';
 
 import type { Request, Response } from 'express';
+import { mysql as sql } from '../utils';
 
 type DatabaseRow = Record<string, any>;
 
-interface QueryResponse {
-	data?: DatabaseRow[];
-	ok?: number;
-	error?: string[];
-}
-
 interface SiteConfig {
 	page_size: number;
-}
-
-interface AdminSqlEngine {
-	executeQuery(...args: any[]): Promise<QueryResponse>;
-	handle: {
-		query(stmt: string, callback: (error: Error | null, dataSet: DatabaseRow[]) => void): void;
-	};
 }
 
 const LANG_LABELS = require('../js/language').label(),
@@ -27,8 +15,7 @@ const LANG_LABELS = require('../js/language').label(),
 	directory = '../server/js',
 	siteMap = '../server/file/sitemap.txt',
 	config: { deleteAdvertise(id: unknown): Promise<unknown> } = require('./ad-config'),
-	helper = require('./helper'),
-	sql: AdminSqlEngine = require('./sql-engine');
+	helper = require('./helper');
 
 const adminFunction = (req: Request, res: Response) => {
 	let action = req.body.action || req.body.admin_action,
