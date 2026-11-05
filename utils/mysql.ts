@@ -1,7 +1,5 @@
 import { type Connection, type QueryError, type QueryValues, createConnection } from 'mysql2';
 
-require('dotenv').config();
-
 type DatabaseRows = Record<string, any>[];
 
 export interface DatabaseResponse {
