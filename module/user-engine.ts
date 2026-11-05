@@ -1,6 +1,7 @@
 'use strict';
 
 import type { Request, Response } from 'express';
+import { sign, verify, VerifyErrors, JwtPayload } from 'jsonwebtoken';
 import type { QueryValues } from 'mysql2';
 import { mysql as sql } from '../utils';
 
@@ -55,6 +56,30 @@ interface MailEngine {
 	send(): Promise<MailResponse>;
 }
 
+type CookieOptions = {
+	httpOnly: boolean;
+	secure: boolean;
+	sameSite: 'strict';
+};
+
+const COOKIE_OPTIONS: CookieOptions = {
+	httpOnly: true,
+	secure: true,
+	sameSite: 'strict'
+};
+
+const accessTokenMaxAge = 15 * 60 * 1000;
+
+const accessTokenExpiresIn = '15m';
+
+const refreshTokenMaxAge = 7 * 24 * 60 * 60 * 1000;
+
+const refreshTokenExpiresIn = '7d';
+
+const secret = process.env.JWT_SECRET as string;
+
+const refreshSecret = process.env.JWT_REFRESH_SECRET as string;
+
 const LANG_LABELS = require('../js/language').label(),
 	session: SessionEngine = require('./session'),
 	helper = require('./helper'),
@@ -68,7 +93,7 @@ const confidentialize = (user: UserSession): void => {
 	delete user.password;
 	delete user.last_sign_in;
 };
-	
+
 const userAdvertiseDetail = (req: Request, res: Response, bind: QueryValues[]) => {
 	const lang = req.cookies.lang;
 	const sqlStmt = `select a.id as 'id',a.name as 'name',a.html as 'html',a.address as 'address',a.description as 'description',a.is_free,a.currency,a.price,a.contact_method as 'contact_method',a.contact_email as 'contact_email',a.contact_phone as 'contact_phone',a.city_id as 'city_id',a.province_id as 'province_id',cast(date(a.create_time) as char) as 'create_date',a.item_id as 'item_id',a.category_id as 'category_id',a.viewed as 'viewed',p.ids as 'picture_ids'
@@ -79,123 +104,180 @@ const userAdvertiseDetail = (req: Request, res: Response, bind: QueryValues[]) =
 			where a.active=? and a.user_id=? and a.id=?`;
 	sql.executeQuery(sqlStmt, bind).then((promise: QueryResponse) => {
 		let ad = promise.data && promise.data[0] || null;
-		if(ad === null) {
+		if (ad === null) {
 			res.send(LANG_LABELS.unknown_error[lang]);
-		}else {
+		} else {
 			advertise.processAdvertise(ad);
 			ad.images = ad.picture_ids;
-			res.send({angular_ad: ad});
-		}			
+			res.send({ angular_ad: ad });
+		}
 	}).catch(() => {
 		res.send(LANG_LABELS.unknown_error[lang]);
 	});
-};		
-			
+};
+
 const signIn = (req: Request, res: Response) => {
-	const {email, password} = req.body;
+	const { email, password } = req.body;
 	let error = [],
 		user: UserSession | null = null,
 		lang = req.cookies.lang;
-		
-	if(email === '') {
+
+	if (email === '') {
 		error.push(LANG_LABELS.r_email[lang]);
-	}else if(!helper.validEmail(email)) {
+	} else if (!helper.validEmail(email)) {
 		error.push(LANG_LABELS.w_email[lang]);
 	}
-	
-	if(error.length) {
-		return res.send({error: error});
+
+	if (error.length) {
+		return res.send({ error: error });
 	}
 
 	sql.executeQuery('select', 'user', { email: email }).then((promise: QueryResponse) => {
 		user = (promise.data && promise.data[0] as UserSession) || null;
-		if(!user) {
-			return res.send({error: LANG_LABELS.email_not_found[lang]});
+		if (!user) {
+			return res.send({ error: LANG_LABELS.email_not_found[lang] });
 		}
 		const authenticatedUser = user;
 
-		if(password === '') {
-			return res.send({error: LANG_LABELS.r_password[lang]});
-		}else if(authenticatedUser.password !== helper.siteEncryption(email.toLowerCase(), password)) {
-			return res.send({error: LANG_LABELS.wrong_password[lang]});
-		}else {
+		if (password === '') {
+			return res.send({ error: LANG_LABELS.r_password[lang] });
+		} else if (authenticatedUser.password !== helper.siteEncryption(email.toLowerCase(), password)) {
+			return res.send({ error: LANG_LABELS.wrong_password[lang] });
+		} else {
+			const userPayload = { userId: authenticatedUser.id, email: authenticatedUser.email, access_level: authenticatedUser.access_level };
+			const accessToken = sign(
+				userPayload,
+				secret,
+				{ expiresIn: accessTokenExpiresIn }
+			);
+			const refreshToken = sign(
+				userPayload,
+				refreshSecret,
+				{ expiresIn: refreshTokenExpiresIn }
+			);
+
+			sql.executeStmt('insert into refresh_tokens (id) values (?)', [refreshToken]);
 			confidentialize(authenticatedUser);
 			session.create().then(promise => {
-				session.set(promise.sessionId, {user: authenticatedUser}).then(() => {
+				session.set(promise.sessionId, { user: authenticatedUser }).then(() => {
+					// Send token back inside a highly secure cookie
+					res.cookie('access-token', accessToken, { ...COOKIE_OPTIONS, maxAge: accessTokenMaxAge });
+					res.cookie('refresh-token', refreshToken, { ...COOKIE_OPTIONS, maxAge: refreshTokenMaxAge });
 					res.cookie('session_id', promise.sessionId);
 					res.cookie('user_is_signed_in', 1);
-					res.send({user: { 
-						email: authenticatedUser.email,
-						first_name: authenticatedUser.first_name,
-						last_name: authenticatedUser.last_name,
-						access_level: authenticatedUser.access_level
-					}});
+					res.send({
+						user: {
+							email: authenticatedUser.email,
+							first_name: authenticatedUser.first_name,
+							last_name: authenticatedUser.last_name,
+							access_level: authenticatedUser.access_level
+						}
+					});
 				});
 			});
 		}
 	}).catch(() => {
-		res.send({error: LANG_LABELS.unknown_error[lang]});
+		res.send({ error: LANG_LABELS.unknown_error[lang] });
+	});
+};
+
+const refreshToken = (req: Request, res: Response) => {
+	const refreshToken = req.cookies['refresh-token'];
+	if (!refreshToken) {
+		res.send({ error: 'Refresh Token Missing' });
+	}
+
+	sql.executeQuery('select', 'refresh_tokens', { id: refreshToken }).then((promise: QueryResponse) => {
+		let token = (promise.data && promise.data[0]) || null;
+		if (token === null) {
+			res.send({ error: 'Refresh Token Revoked or Invalid' });
+		} else {
+			// Verify digital signature
+			verify(refreshToken, refreshSecret, (err: any, decoded: any) => {
+				if (err) { res.send({ error: 'Refresh Token Expired' }); }
+
+				// Issue a clean, new 15-minute access token
+				const userPayload = { userId: decoded.id, email: decoded.email, access_level: decoded.access_level };
+				const newAccessToken = sign(
+					userPayload,
+					secret,
+					{ expiresIn: accessTokenExpiresIn }
+				);
+
+				// Overwrite the old access-token cookie
+				res.cookie('access-token', newAccessToken, { ...COOKIE_OPTIONS, maxAge: accessTokenMaxAge });
+
+				res.send({ message: 'Token renewed successfully' });
+			});
+		}
+	}).catch(() => {
+		res.send({ error: 'Refresh Token Revoked or Invalid' });
 	});
 };
 
 const signOut = (req: Request, res: Response) => {
 	const sessionId = req.cookies.session_id || null,
 		lang = req.cookies.lang;
-	
-	if(sessionId !== null) {
+
+	const refreshToken = req.cookies['refresh-token'];
+	sql.executeStmt('delete from refresh_tokens where id = ?', [refreshToken]);
+
+	if (sessionId !== null) {
 		res.clearCookie('session_id');
 		res.clearCookie('user_is_signed_in');
-		
+		// Instantly clear the cookie on the client side
+		res.clearCookie('access-token', COOKIE_OPTIONS);
+		res.clearCookie('refresh-token', COOKIE_OPTIONS);
 		session.remove(sessionId).then(() => {
-			res.send({ok: 1});
+			res.send({ ok: 1 });
 		}).catch(() => {
-			res.send({error: LANG_LABELS.unknown_error[lang]});
+			res.send({ error: LANG_LABELS.unknown_error[lang] });
 		});
-	}else {
-		res.send({error: LANG_LABELS.sign_outed[lang]});
+	} else {
+		res.send({ error: LANG_LABELS.sign_outed[lang] });
 	}
 };
 
 const register = (req: Request, res: Response) => {
 	let lang = req.cookies.lang,
 		error = [],
-		{first_name, last_name, middle_name, password, email} = req.body;
-		
+		{ first_name, last_name, middle_name, password, email } = req.body;
+
 	middle_name = middle_name || '';
 	email = email.toLowerCase();
-	if(first_name === '') {
+	if (first_name === '') {
 		error.push(LANG_LABELS.r_first_name[lang]);
 	}
-	if(last_name === '') {
+	if (last_name === '') {
 		error.push(LANG_LABELS.r_last_name[lang]);
 	}
-	if(email === '') {
+	if (email === '') {
 		error.push(LANG_LABELS.r_email[lang]);
-	}else if(!helper.validEmail(email)) {
+	} else if (!helper.validEmail(email)) {
 		error.push(LANG_LABELS.w_email[lang]);
 	}
-	if(password === '') {
+	if (password === '') {
 		error.push(LANG_LABELS.r_password[lang]);
-	}else if(!(password.match(/[a-z]+/i) && password.match(/\d+/) && password.length >= 10 && !password.match(/\s/))) {
+	} else if (!(password.match(/[a-z]+/i) && password.match(/\d+/) && password.length >= 10 && !password.match(/\s/))) {
 		error.push(LANG_LABELS.w_password[lang]);
 	}
-	
-	if(error.length) {
-		return res.send({error: error});
-	}else {
+
+	if (error.length) {
+		return res.send({ error: error });
+	} else {
 		sql.executeQuery('select', 'user', { email: email }).then((promise: QueryResponse) => {
 			let user = (promise.data && promise.data[0]) || null;
-			if(user !== null) {
-				res.send({error: LANG_LABELS.email_exist[lang]});
-			}else {
+			if (user !== null) {
+				res.send({ error: LANG_LABELS.email_exist[lang] });
+			} else {
 				sql.executeStmt('insert into user (first_name, last_name, middle_name, password, email, active, create_time, edit_time) values (?, ?, ?, ?, ?, ?, now(), now())', [first_name, last_name, middle_name, helper.siteEncryption(email, password), email, 1]).then((promise: QueryResponse) => {
-					res.send(promise.error ? {error: promise.error} : {message: LANG_LABELS.account_done[lang]});
+					res.send(promise.error ? { error: promise.error } : { message: LANG_LABELS.account_done[lang] });
 				}).catch(() => {
-					res.send({error: LANG_LABELS.unknown_error[lang]});
+					res.send({ error: LANG_LABELS.unknown_error[lang] });
 				});
 			}
 		}).catch(() => {
-			res.send({error: LANG_LABELS.unknown_error[lang]});
+			res.send({ error: LANG_LABELS.unknown_error[lang] });
 		});
 	}
 };
@@ -206,26 +288,26 @@ const forgetPassword = (req: Request, res: Response) => {
 		error = null,
 		user: UserSession | null = null;
 
-	if(email === '') {
+	if (email === '') {
 		error = LANG_LABELS.r_email[lang];
-	}else if(!helper.validEmail(email)) {
+	} else if (!helper.validEmail(email)) {
 		error = LANG_LABELS.w_email[lang];
 	}
 
-	if(error) {
-		res.send({error: error});
-	}else {
+	if (error) {
+		res.send({ error: error });
+	} else {
 		sql.executeQuery('select', 'user', { email: email }).then((promise: QueryResponse) => {
 			user = (promise.data && promise.data[0] as UserSession) || null;
-			if(user === null) {
-				return res.send({error: LANG_LABELS.email_not_found[lang]});
-			}else {
+			if (user === null) {
+				return res.send({ error: LANG_LABELS.email_not_found[lang] });
+			} else {
 				const account = user;
 				let accCode = helper.uuid();
 				sql.executeQuery('update', 'user', { id: account.id }, { acc_code: accCode }).then((promise: QueryResponse) => {
-					if(promise.error) {
-						return res.send({error: promise.error});
-					}else {
+					if (promise.error) {
+						return res.send({ error: promise.error });
+					} else {
 						mail.subject(LANG_LABELS.set_pwd_sub[lang]);
 						mail.to(email);
 						mail.html(helper.replace(template.get(`reset_password_email_${lang}`), {
@@ -234,18 +316,18 @@ const forgetPassword = (req: Request, res: Response) => {
 							domain: (content.get('site_config') as SiteConfig).domain
 						}));
 						mail.send().then((response: MailResponse) => {
-							res.send(response.success ? {message: LANG_LABELS.reset_link_sent[lang]} : {error: response.error || LANG_LABELS.unknown_error[lang]});
+							res.send(response.success ? { message: LANG_LABELS.reset_link_sent[lang] } : { error: response.error || LANG_LABELS.unknown_error[lang] });
 						}).catch(() => {
-							res.send({error: LANG_LABELS.unknown_error[lang]});
-						});						
+							res.send({ error: LANG_LABELS.unknown_error[lang] });
+						});
 					}
 				}).catch((e) => {
-					res.send({error: LANG_LABELS.unknown_error[lang]});
+					res.send({ error: LANG_LABELS.unknown_error[lang] });
 				});
 			}
 		}).catch(() => {
-			res.send({error: LANG_LABELS.unknown_error[lang]});
-		});		
+			res.send({ error: LANG_LABELS.unknown_error[lang] });
+		});
 	}
 };
 
@@ -256,106 +338,119 @@ const resetPassword = (req: Request, res: Response) => {
 		accCode = req.body.acc_code,
 		error = [];
 
-	if(password === '') {
+	if (password === '') {
 		error.push(LANG_LABELS.r_password[lang]);
-	}else if(!(password.match(/[a-z]+/i) && password.match(/\d+/) && password.length >= 10 && !password.match(/\s/))) {
+	} else if (!(password.match(/[a-z]+/i) && password.match(/\d+/) && password.length >= 10 && !password.match(/\s/))) {
 		error.push(LANG_LABELS.w_password[lang]);
-	}else if(password !== confirmPassword) {
+	} else if (password !== confirmPassword) {
 		error.push(LANG_LABELS.w_pwd_no_match[lang]);
 	}
 
-	if(error.length) {
-		res.send({error: error});
-	}else {
-		if(accCode.match(/(:?cn|en)$/)) {
+	if (error.length) {
+		res.send({ error: error });
+	} else {
+		if (accCode.match(/(:?cn|en)$/)) {
 			accCode = accCode.replace(/(:?cn|en)$/, '');
 		}
 		sql.executeQuery('select', 'user', { acc_code: accCode }).then(promise => {
 			let user = (promise.data && promise.data[0] as UserSession) || null;
-			if(user === null) {
-				return res.send({error: LANG_LABELS.wrong_url_param[lang]});
-			}else {
+			if (user === null) {
+				return res.send({ error: LANG_LABELS.wrong_url_param[lang] });
+			} else {
 				sql.executeQuery('update', 'user', { id: user.id }, { acc_code: '', password: helper.siteEncryption(user.email, password) }).then((_promise: QueryResponse) => {
-					res.send({message: LANG_LABELS.pwd_reseted[lang]});
+					res.send({ message: LANG_LABELS.pwd_reseted[lang] });
 				}).catch((e) => {
-					res.send({error: LANG_LABELS.unknown_error[lang]});
+					res.send({ error: LANG_LABELS.unknown_error[lang] });
 				});
 			}
 		}).catch((e) => {
-			res.send({error: LANG_LABELS.unknown_error[lang]});
-		});		
+			res.send({ error: LANG_LABELS.unknown_error[lang] });
+		});
 	}
 };
 
 const workUserData = (req: Request, res: Response) => {
 	let action = req.body.action,
 		lang = req.cookies.lang,
+		token = req.cookies['access-token'] || null,
 		error = [],
 		user: UserSession | null = (session.exist(req.cookies.session_id) && session.get(req.cookies.session_id!, 'user') as UserSession) || null;
 
-	if(user === null) {
-		res.send({error: LANG_LABELS.sign_outed[lang]});
+	if (user === null) {
+		res.send({ error: LANG_LABELS.sign_outed[lang] });
 		return;
 	}
 	const currentUser = user;
-		
-	if(action === 'delete_user_advertise') {
+
+	if (!token) {
+		return res.send({ error: 'Access Denied: No Cookie Provided' });
+	}
+
+	verify(token, secret, (err: any, decoded: any) => {
+		if (err) {
+			res.send({ error: 'Invalid or Expired Token' });
+		}
+
+		console.log('Decoded Token:', decoded);
+	});
+
+	if (action === 'delete_user_advertise') {
 		config.deleteAdvertise(req.body.advertise_id).then(success => {
-			res.send({ok: 1});
+			res.send({ ok: 1 });
 		}).catch(() => {
-			res.send({error: LANG_LABELS.unknown_error[lang]});
-		});		
-	}else if(action === 'fetch_user_profile') {
-		res.send({user: user});
-	}else if(action === 'fetch_user_ads') {
+			res.send({ error: LANG_LABELS.unknown_error[lang] });
+		});
+	} else if (action === 'fetch_user_profile') {
+		res.send({ user: user });
+	} else if (action === 'fetch_user_ads') {
 		sql.executeQuery('select id,name,viewed,description,is_free,price from advertise where user_id=? and active=1 order by create_time desc', [currentUser.id]).then(promise => {
 			let ads = promise.data || [];
 			ads.forEach(ad => {
 				ad.description = ad.description.toString();
 			});
-			res.send({ads: ads});
+			res.send({ ads: ads });
 		}).catch(() => {
-			res.send({error: LANG_LABELS.unknown_error[lang]});
+			res.send({ error: LANG_LABELS.unknown_error[lang] });
 		});
-	}else if(action === 'fetch_user_ad') {
-		if(req.body.advertise_id !== undefined) {
+	} else if (action === 'fetch_user_ad') {
+		if (req.body.advertise_id !== undefined) {
 			userAdvertiseDetail(req, res, [1, currentUser.id, req.body.advertise_id]);
-		}else {
-			res.send({error: LANG_LABELS.unknown_error[lang]});
+		} else {
+			res.send({ error: LANG_LABELS.unknown_error[lang] });
 		}
-	}else if(action === 'change_user_profile') {
+	} else if (action === 'change_user_profile') {
 		const firstName = (req.body.first_name || '').trim(),
 			lastName = (req.body.last_name || '').trim(),
 			password = req.body.password;
 
-		if(firstName === '') {
+		if (firstName === '') {
 			error.push(LANG_LABELS.r_first_name[lang]);
 		}
-		if(lastName === '') {
+		if (lastName === '') {
 			error.push(LANG_LABELS.r_last_name[lang]);
 		}
-		if(password !== '' && !(password.match(/[A-Z]+/) && password.match(/[a-z]+/) && password.match(/\d+/) && password.length >= 10 && !password.match(/\s/))) {
+		if (password !== '' && !(password.match(/[A-Z]+/) && password.match(/[a-z]+/) && password.match(/\d+/) && password.length >= 10 && !password.match(/\s/))) {
 			error.push(LANG_LABELS.w_password[lang]);
 		}
 
-		if(error.length) {
-			res.send({error: error});
-		}else {
-			let update: Partial<UserSession> & Record<string, unknown> = {first_name: firstName, last_name: lastName};
-			if(password !== '') {
+		if (error.length) {
+			res.send({ error: error });
+		} else {
+			let update: Partial<UserSession> & Record<string, unknown> = { first_name: firstName, last_name: lastName };
+			if (password !== '') {
 				update.password = helper.siteEncryption(currentUser.email, password);
 			}
-			const updatedUser = {...currentUser, ...update};
+			const updatedUser = { ...currentUser, ...update };
 			confidentialize(updatedUser);
-			session.set(req.cookies.session_id, {user: updatedUser}).then(() => {
-				sql.executeQuery('update', 'user', {id: currentUser.id}, update).then(promise => {
-					res.send(promise.ok ? {message: LANG_LABELS.edit_profile_done[lang]} : {error: promise.error});
+			session.set(req.cookies.session_id, { user: updatedUser }).then(() => {
+				sql.executeQuery('update', 'user', { id: currentUser.id }, update).then(promise => {
+					res.send(promise.ok ? { message: LANG_LABELS.edit_profile_done[lang] } : { error: promise.error });
 				}).catch(() => {
-					res.send({error: LANG_LABELS.unknown_error[lang]});
+					res.send({ error: LANG_LABELS.unknown_error[lang] });
 				});
 			});
 		}
-	}else {
+	} else {
 		res.end();
 		return;
 	}
@@ -365,30 +460,31 @@ const workVisitorData = (req: Request, res: Response) => {
 	let lang = req.cookies.lang,
 		visitor: VisitorSession | null = (session.exist(req.cookies.session_id) && session.get(req.cookies.session_id!, 'visitor') as VisitorSession) || null;
 
-	if(!visitor) {
-		return res.send({error: LANG_LABELS.visitor_in_err[lang]});
+	if (!visitor) {
+		return res.send({ error: LANG_LABELS.visitor_in_err[lang] });
 	}
-	
+
 	config.deleteAdvertise(visitor.v_ad_id).then(success => {
-		session.remove(req.cookies.session_id, ['visitor']).then(() => {;
-			res.send({ok: 1});
+		session.remove(req.cookies.session_id, ['visitor']).then(() => {
+			;
+			res.send({ ok: 1 });
 		}).catch(() => {
-			res.send({error: LANG_LABELS.unknown_error[lang]});
+			res.send({ error: LANG_LABELS.unknown_error[lang] });
 		});
 	}).catch(() => {
-		res.send({error: LANG_LABELS.unknown_error[lang]});
-	});		
+		res.send({ error: LANG_LABELS.unknown_error[lang] });
+	});
 };
 
 const fetchVisitorAdvertise = (req: Request, res: Response) => {
 	let lang = req.cookies.lang,
 		visitor: VisitorSession | null = (session.exist(req.cookies.session_id) && session.get(req.cookies.session_id!, 'visitor') as VisitorSession) || null;
-		
-	if(visitor) {
+
+	if (visitor) {
 		userAdvertiseDetail(req, res, [1, visitor.v_user_id, visitor.v_ad_id]);
-	}else {
+	} else {
 		res.send(LANG_LABELS.unknown_error[lang]);
-	}		
+	}
 };
 
 exports.signIn = signIn;
@@ -399,3 +495,4 @@ exports.resetPassword = resetPassword;
 exports.workUserData = workUserData;
 exports.workVisitorData = workVisitorData;
 exports.fetchVisitorAdvertise = fetchVisitorAdvertise;
+exports.refreshToken = refreshToken;
