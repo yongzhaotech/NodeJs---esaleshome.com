@@ -51,12 +51,6 @@ interface MailEngine {
 	send(): Promise<MailResponse>;
 }
 
-type CookieOptions = {
-	httpOnly: boolean;
-	secure: boolean;
-	sameSite: 'strict';
-};
-
 const LANG_LABELS = require('../js/language').label(),
 	session: SessionEngine = require('./session'),
 	helper = require('./helper'),
@@ -159,18 +153,19 @@ const signIn = (req: Request, res: Response) => {
 };
 
 const signOut = (req: Request, res: Response) => {
-	const sessionId = req.cookies.session_id || null,
+	const sessionId = req.cookies.session_id,
 		lang = req.cookies.lang;
 
 	const refreshToken = req.cookies['refresh-token'];
 	sql.executeStmt('delete from refresh_tokens where id = ?', [refreshToken]);
 
-	if (sessionId !== null) {
-		res.clearCookie('session_id');
-		res.clearCookie('user_is_signed_in');
-		// Instantly clear the cookie on the client side
-		res.clearCookie('access-token', jwtConfig.COOKIE_OPTIONS);
-		res.clearCookie('refresh-token', jwtConfig.COOKIE_OPTIONS);
+	res.clearCookie('session_id');
+	res.clearCookie('user_is_signed_in');
+	// Instantly clear the cookie on the client side
+	res.clearCookie('access-token', jwtConfig.COOKIE_OPTIONS);
+	res.clearCookie('refresh-token', jwtConfig.COOKIE_OPTIONS);
+
+	if (sessionId) {
 		session.remove(sessionId).then(() => {
 			res.send({ ok: 1 });
 		}).catch(() => {
