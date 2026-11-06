@@ -1,6 +1,16 @@
 import { type Connection, type QueryError, type QueryValues, createConnection } from 'mysql2';
 
-type DatabaseRows = Record<string, any>[];
+
+
+export type DatabaseRow = Record<string, any>;
+
+export type DatabaseRows = DatabaseRow[];
+
+export interface QueryResponse {
+    data?: DatabaseRow[];
+    ok?: number;
+    error?: unknown;
+}
 
 export interface DatabaseResponse {
     data?: DatabaseRows;

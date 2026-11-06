@@ -22,7 +22,8 @@
 		"js/**/*.ts",
 		"module/**/*.js",
 		"module/**/*.ts",
-		"utils/**/*.ts"
+		"utils/**/*.ts",
+		"constants/**/*.ts"
 	],
 	"exclude": [
 		"node_modules",

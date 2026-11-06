@@ -1,17 +1,12 @@
 'use strict';
 
 import type { Request, Response } from 'express';
-import { sign, verify, VerifyErrors, JwtPayload } from 'jsonwebtoken';
+import { sign } from 'jsonwebtoken';
 import type { QueryValues } from 'mysql2';
-import { mysql as sql } from '../utils';
+import { mysql as sql, QueryResponse, DatabaseRow } from '../utils';
+import { jwtConfig } from '../constants';
 
-type DatabaseRow = Record<string, any>;
-
-interface QueryResponse {
-	data?: DatabaseRow[];
-	ok?: number;
-	error?: unknown;
-}
+// type DatabaseRow = Record<string, any>;
 
 interface UserSession extends DatabaseRow {
 	id: number | string;
@@ -61,24 +56,6 @@ type CookieOptions = {
 	secure: boolean;
 	sameSite: 'strict';
 };
-
-const COOKIE_OPTIONS: CookieOptions = {
-	httpOnly: true,
-	secure: true,
-	sameSite: 'strict'
-};
-
-const accessTokenMaxAge = 15 * 60 * 1000;
-
-const accessTokenExpiresIn = '15m';
-
-const refreshTokenMaxAge = 7 * 24 * 60 * 60 * 1000;
-
-const refreshTokenExpiresIn = '7d';
-
-const secret = process.env.JWT_SECRET as string;
-
-const refreshSecret = process.env.JWT_REFRESH_SECRET as string;
 
 const LANG_LABELS = require('../js/language').label(),
 	session: SessionEngine = require('./session'),
@@ -147,13 +124,13 @@ const signIn = (req: Request, res: Response) => {
 			const userPayload = { userId: authenticatedUser.id, email: authenticatedUser.email, access_level: authenticatedUser.access_level };
 			const accessToken = sign(
 				userPayload,
-				secret,
-				{ expiresIn: accessTokenExpiresIn }
+				jwtConfig.secret,
+				{ expiresIn: jwtConfig.accessTokenExpiresIn }
 			);
 			const refreshToken = sign(
 				userPayload,
-				refreshSecret,
-				{ expiresIn: refreshTokenExpiresIn }
+				jwtConfig.refreshSecret,
+				{ expiresIn: jwtConfig.refreshTokenExpiresIn }
 			);
 
 			sql.executeStmt('insert into refresh_tokens (id) values (?)', [refreshToken]);
@@ -161,8 +138,8 @@ const signIn = (req: Request, res: Response) => {
 			session.create().then(promise => {
 				session.set(promise.sessionId, { user: authenticatedUser }).then(() => {
 					// Send token back inside a highly secure cookie
-					res.cookie('access-token', accessToken, { ...COOKIE_OPTIONS, maxAge: accessTokenMaxAge });
-					res.cookie('refresh-token', refreshToken, { ...COOKIE_OPTIONS, maxAge: refreshTokenMaxAge });
+					res.cookie('access-token', accessToken, { ...jwtConfig.COOKIE_OPTIONS, maxAge: jwtConfig.accessTokenMaxAge });
+					res.cookie('refresh-token', refreshToken, { ...jwtConfig.COOKIE_OPTIONS, maxAge: jwtConfig.refreshTokenMaxAge });
 					res.cookie('session_id', promise.sessionId);
 					res.cookie('user_is_signed_in', 1);
 					res.send({
@@ -181,40 +158,6 @@ const signIn = (req: Request, res: Response) => {
 	});
 };
 
-const refreshToken = (req: Request, res: Response) => {
-	const refreshToken = req.cookies['refresh-token'];
-	if (!refreshToken) {
-		res.send({ error: 'Refresh Token Missing' });
-	}
-
-	sql.executeQuery('select', 'refresh_tokens', { id: refreshToken }).then((promise: QueryResponse) => {
-		let token = (promise.data && promise.data[0]) || null;
-		if (token === null) {
-			res.send({ error: 'Refresh Token Revoked or Invalid' });
-		} else {
-			// Verify digital signature
-			verify(refreshToken, refreshSecret, (err: any, decoded: any) => {
-				if (err) { res.send({ error: 'Refresh Token Expired' }); }
-
-				// Issue a clean, new 15-minute access token
-				const userPayload = { userId: decoded.id, email: decoded.email, access_level: decoded.access_level };
-				const newAccessToken = sign(
-					userPayload,
-					secret,
-					{ expiresIn: accessTokenExpiresIn }
-				);
-
-				// Overwrite the old access-token cookie
-				res.cookie('access-token', newAccessToken, { ...COOKIE_OPTIONS, maxAge: accessTokenMaxAge });
-
-				res.send({ message: 'Token renewed successfully' });
-			});
-		}
-	}).catch(() => {
-		res.send({ error: 'Refresh Token Revoked or Invalid' });
-	});
-};
-
 const signOut = (req: Request, res: Response) => {
 	const sessionId = req.cookies.session_id || null,
 		lang = req.cookies.lang;
@@ -226,8 +169,8 @@ const signOut = (req: Request, res: Response) => {
 		res.clearCookie('session_id');
 		res.clearCookie('user_is_signed_in');
 		// Instantly clear the cookie on the client side
-		res.clearCookie('access-token', COOKIE_OPTIONS);
-		res.clearCookie('refresh-token', COOKIE_OPTIONS);
+		res.clearCookie('access-token', jwtConfig.COOKIE_OPTIONS);
+		res.clearCookie('refresh-token', jwtConfig.COOKIE_OPTIONS);
 		session.remove(sessionId).then(() => {
 			res.send({ ok: 1 });
 		}).catch(() => {
@@ -372,7 +315,6 @@ const resetPassword = (req: Request, res: Response) => {
 const workUserData = (req: Request, res: Response) => {
 	let action = req.body.action,
 		lang = req.cookies.lang,
-		token = req.cookies['access-token'] || null,
 		error = [],
 		user: UserSession | null = (session.exist(req.cookies.session_id) && session.get(req.cookies.session_id!, 'user') as UserSession) || null;
 
@@ -381,18 +323,6 @@ const workUserData = (req: Request, res: Response) => {
 		return;
 	}
 	const currentUser = user;
-
-	if (!token) {
-		return res.send({ error: 'Access Denied: No Cookie Provided' });
-	}
-
-	verify(token, secret, (err: any, decoded: any) => {
-		if (err) {
-			res.send({ error: 'Invalid or Expired Token' });
-		}
-
-		console.log('Decoded Token:', decoded);
-	});
 
 	if (action === 'delete_user_advertise') {
 		config.deleteAdvertise(req.body.advertise_id).then(success => {
@@ -495,4 +425,3 @@ exports.resetPassword = resetPassword;
 exports.workUserData = workUserData;
 exports.workVisitorData = workVisitorData;
 exports.fetchVisitorAdvertise = fetchVisitorAdvertise;
-exports.refreshToken = refreshToken;
