@@ -68,6 +68,4 @@ app.post('/request', express.urlencoded({ extended: false }), server.request);
 
 app.post('/create-video', upload.any(), videoEngine.createVideo);
 
-app.post('/api/refresh', express.urlencoded({ extended: false }), userEngine.refreshToken);
-
 app.listen(port, host);
