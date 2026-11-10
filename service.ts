@@ -68,4 +68,6 @@ app.post('/request', express.urlencoded({ extended: false }), server.request);
 
 app.post('/create-video', upload.any(), videoEngine.createVideo);
 
+app.get('/advertise-list', express.urlencoded({ extended: false }), adEngine.getlists);
+
 app.listen(port, host);

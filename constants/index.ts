@@ -25,8 +25,6 @@ const COOKIE_OPTIONS: CookieOptions = {
     sameSite: 'strict'
 };
 
-const accessTokenMaxAge = 15 * 60 * 1000;
-
 const accessTokenExpiresIn = '15m';
 
 const refreshTokenMaxAge = 7 * 24 * 60 * 60 * 1000;
@@ -37,8 +35,9 @@ const secret = process.env.JWT_SECRET as string;
 
 const refreshSecret = process.env.JWT_REFRESH_SECRET as string;
 
+export const sessionLifeTime = refreshTokenMaxAge; 
+
 export const jwtConfig = {
-    accessTokenMaxAge,
     accessTokenExpiresIn,
     refreshTokenMaxAge,
     refreshTokenExpiresIn,

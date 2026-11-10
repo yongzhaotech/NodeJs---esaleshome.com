@@ -1,19 +1,19 @@
 'use strict';
 import type { NextFunction, Request, Response } from 'express';
 import { sign, verify, JwtPayload, decode } from 'jsonwebtoken';
-import { mysql as sql, QueryResponse } from '../utils';
+import { mysql as sql } from '../utils';
 import { jwtConfig, AUTH_STATUS, AuthStatus } from '../constants';
 
 const LANG_LABELS = require('../js/language').label(),
 	content = require('../js/static-content'),
-	session = require('./session'),
 	origins = {
 		'http://www.esaleshome.com': true,
 		'http://esaleshome.com': true,
 		'www.esaleshome.com': true,
 		'esaleshome.com': true,
 		'http://localhost:3000': true,
-		'http://192.168.2.32:3000': true
+		'http://192.168.2.32:3000': true,
+		'http://localhost:5173': true
 	};
 
 type Language = 'en' | 'cn';
@@ -49,17 +49,6 @@ interface SelectResponse {
 
 const getLanguage = (language?: string): Language => language === 'cn' ? 'cn' : 'en';
 
-const getSessionUser = (user: unknown): SessionUser | null => {
-	if (user && typeof user === 'object' && 'id' in user && 'access_level' in user) {
-		const sessionUser = user as Record<string, unknown>;
-		if ((typeof sessionUser.id === 'string' || typeof sessionUser.id === 'number') &&
-			(typeof sessionUser.access_level === 'string' || typeof sessionUser.access_level === 'number')) {
-			return { id: sessionUser.id, access_level: sessionUser.access_level };
-		}
-	}
-	return null;
-};
-
 const refreshAccessToken = async (req: MiddlewareRequest, res: Response): Promise<AuthStatus> => {
 	// access token cookie in user's browser might have expired or been deleted, so we detect if the refresh token is still valid and issue a new access token if it is
 	const refreshToken = req.cookies['refresh-token'];
@@ -68,7 +57,6 @@ const refreshAccessToken = async (req: MiddlewareRequest, res: Response): Promis
 			const { data = [] } = await sql.executeQuery('select', 'refresh_tokens', { id: refreshToken });
 			if (data.length === 0) {
 				// refresh token not found in the db
-
 				return Promise.reject(AUTH_STATUS.INVALID_TOKEN);
 			}
 			const decodedRefresh = verify(refreshToken, jwtConfig.refreshSecret) as JwtPayload;
@@ -83,9 +71,8 @@ const refreshAccessToken = async (req: MiddlewareRequest, res: Response): Promis
 				jwtConfig.secret,
 				{ expiresIn: jwtConfig.accessTokenExpiresIn }
 			);
-
 			// Overwrite the old access-token cookie
-			res.cookie('access-token', newAccessToken, { ...jwtConfig.COOKIE_OPTIONS, maxAge: jwtConfig.accessTokenMaxAge });
+			res.cookie('access-token', newAccessToken, jwtConfig.COOKIE_OPTIONS);
 			return Promise.resolve(AUTH_STATUS.OK);
 		} catch (error) {
 			// refresh token error captured
@@ -160,9 +147,9 @@ const checkPermission = (req: MiddlewareRequest, res: Response, next: NextFuncti
 };
 
 const accessControl = async (req: MiddlewareRequest, res: Response, next: NextFunction) => {
-	let origin = req.get('origin');
+	const origin = req.get('origin') ?? '';
 	res.append('Access-Control-Allow-Credentials', String(true));
-	if (origin && origin.toLowerCase() in origins) {
+	if (origin.toLowerCase() in origins) {
 		res.append('Access-Control-Allow-Origin', origin);
 	}
 	if (!req.cookies.lang) { res.cookie('lang', 'en'); }
@@ -174,7 +161,11 @@ const accessControl = async (req: MiddlewareRequest, res: Response, next: NextFu
 			res.cookie('user_is_signed_in', 1);
 		}
 	} catch (error) {
+		res.clearCookie('session_id');
 		res.clearCookie('user_is_signed_in');
+		// Instantly clear the cookie on the client side
+		res.clearCookie('access-token', jwtConfig.COOKIE_OPTIONS);
+		res.clearCookie('refresh-token', jwtConfig.COOKIE_OPTIONS);
 	} finally {
 		next();
 	}

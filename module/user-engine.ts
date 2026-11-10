@@ -132,7 +132,8 @@ const signIn = (req: Request, res: Response) => {
 			session.create().then(promise => {
 				session.set(promise.sessionId, { user: authenticatedUser }).then(() => {
 					// Send token back inside a highly secure cookie
-					res.cookie('access-token', accessToken, { ...jwtConfig.COOKIE_OPTIONS, maxAge: jwtConfig.accessTokenMaxAge });
+					// let the access token cookie be session cookie
+					res.cookie('access-token', accessToken, jwtConfig.COOKIE_OPTIONS);
 					res.cookie('refresh-token', refreshToken, { ...jwtConfig.COOKIE_OPTIONS, maxAge: jwtConfig.refreshTokenMaxAge });
 					res.cookie('session_id', promise.sessionId);
 					res.cookie('user_is_signed_in', 1);
