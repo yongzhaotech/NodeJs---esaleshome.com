@@ -3,7 +3,8 @@ import express, { type Express } from 'express';
 
 require('dotenv').config();
 
-const cookieParser = require('cookie-parser'),
+const sql = require('./utils').mysql,
+	cookieParser = require('cookie-parser'),
 	multer = require('multer'),
 	config = require('./module/ad-config'),
 	upload = multer({ dest: config.uploadDirectory, fileFilter: config.fileFilter, limits: { fileSize: config.photoSize, files: config.fileCount } }),
@@ -21,6 +22,18 @@ app.use(cookieParser());
 app.use(express.json()); // Middleware to parse JSON bodies
 app.use('/image/ad', express.static(config.imageDirectory, { fallthrough: false }));
 app.use(middleWare.accessControl);
+
+const cleanupExpiredRefreshTokens = async (): Promise<void> => {
+	const result = await sql.executeStmt('delete from refresh_tokens where expires_at <= ?', [Date.now()]);
+	if (result.error) {
+		console.error('Expired refresh-token cleanup failed', result.error);
+	}
+};
+
+void cleanupExpiredRefreshTokens();
+setInterval(() => {
+	void cleanupExpiredRefreshTokens();
+}, 60 * 60 * 1000);
 
 app.post('/advertise', express.urlencoded({ extended: false }), adEngine.lists);
 

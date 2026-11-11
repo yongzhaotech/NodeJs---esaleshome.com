@@ -1,7 +1,7 @@
 'use strict';
 import type { NextFunction, Request, Response } from 'express';
 import { sign, verify, JwtPayload, decode } from 'jsonwebtoken';
-import { mysql as sql } from '../utils';
+import { mysql as sql, hashRefreshToken } from '../utils';
 import { jwtConfig, AUTH_STATUS, AuthStatus } from '../constants';
 
 const LANG_LABELS = require('../js/language').label(),
@@ -54,17 +54,25 @@ const refreshAccessToken = async (req: MiddlewareRequest, res: Response): Promis
 	const refreshToken = req.cookies['refresh-token'];
 	if (refreshToken) {
 		try {
-			const { data = [] } = await sql.executeQuery('select', 'refresh_tokens', { id: refreshToken });
+			const tokenHash = hashRefreshToken(refreshToken);
+			const { data = [] } = await sql.executeQuery('select', 'refresh_tokens', { id: tokenHash });
 			if (data.length === 0) {
 				// refresh token not found in the db
 				return Promise.reject(AUTH_STATUS.INVALID_TOKEN);
 			}
 			const decodedRefresh = verify(refreshToken, jwtConfig.refreshSecret) as JwtPayload;
-			const ext = decodedRefresh.exp as number;
-			if (Date.now() >= ext * 1000) {
-				// refresh token expires
-				return Promise.reject(AUTH_STATUS.TOKEN_EXPIRED);
+			const tokenExpiresAt = Number(decodedRefresh.exp) * 1000;
+			const storedExpiresAt = Number(data[0].expires_at);
+
+			if (!Number.isFinite(tokenExpiresAt) || !Number.isFinite(storedExpiresAt)) {
+				throw AUTH_STATUS.INVALID_TOKEN;
 			}
+
+			if (Date.now() >= Math.min(tokenExpiresAt, storedExpiresAt)) {
+				await sql.executeStmt('delete from refresh_tokens where id = ?', [tokenHash]);
+				throw AUTH_STATUS.TOKEN_EXPIRED;
+			}
+
 			const userPayload = { userId: decodedRefresh.userId, email: decodedRefresh.email, access_level: decodedRefresh.access_level };
 			const newAccessToken = sign(
 				userPayload,
