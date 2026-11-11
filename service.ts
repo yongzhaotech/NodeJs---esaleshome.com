@@ -13,6 +13,7 @@ const sql = require('./utils').mysql,
 	userEngine = require('./module/user-engine'),
 	adEngine = require('./module/ad-engine'),
 	admin = require('./module/admin-engine'),
+	category = require('./module/category-engine'),
 	videoEngine = require('./module/video-engine'),
 	port = 88,
 	host = '0.0.0.0',
@@ -52,6 +53,10 @@ app.post('/generate-static-content', express.urlencoded({ extended: false }), mi
 app.post('/generate-htmls', express.urlencoded({ extended: false }), middleWare.checkPermission, admin.generateHtmls);
 
 app.post('/admin-function', express.urlencoded({ extended: false }), middleWare.checkPermission, admin.adminFunction);
+
+app.post('/save_category.pl', express.urlencoded({ extended: false }), middleWare.checkPermission, category.saveCategory);
+
+app.post('/save_subcategory.pl', express.urlencoded({ extended: false }), middleWare.checkPermission, category.saveSubcategory);
 
 app.post('/sign-in', express.urlencoded({ extended: false }), userEngine.signIn);
 

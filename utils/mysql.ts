@@ -24,6 +24,11 @@ export interface SqlHandle {
     query<T extends unknown[] = DatabaseRows>(stmt: string, callback: (error: QueryError | null, rows: T) => void): void;
 }
 
+export interface SqlStatement {
+    stmt: string;
+    bind?: QueryValues;
+}
+
 type SqlClause = Record<string, QueryValues> | string | QueryValues[] | undefined;
 type ExecuteData = string[] | Record<string, QueryValues>;
 
@@ -125,6 +130,41 @@ class _Mysql {
 
     executeStmt(stmt: string, bind: QueryValues = []): Promise<DatabaseResponse> {
         return this.#_sqlExecute(stmt, bind);
+    }
+
+    executeTransaction(statements: SqlStatement[]): Promise<DatabaseResponse> {
+        return new Promise(resolve => {
+            this.#_sql.beginTransaction(error => {
+                if (error) {
+                    resolve({ error: sqlError(error) });
+                    return;
+                }
+
+                const executeNext = (index: number): void => {
+                    if (index >= statements.length) {
+                        this.#_sql.commit(error => {
+                            if (error) {
+                                this.#_sql.rollback(() => resolve({ error: sqlError(error) }));
+                            } else {
+                                resolve({ ok: 1 });
+                            }
+                        });
+                        return;
+                    }
+
+                    const { stmt, bind = [] } = statements[index];
+                    this.#_sql.query(stmt, bind, error => {
+                        if (error) {
+                            this.#_sql.rollback(() => resolve({ error: sqlError(error) }));
+                        } else {
+                            executeNext(index + 1);
+                        }
+                    });
+                };
+
+                executeNext(0);
+            });
+        });
     }
 
     executeQuery(command: string, table: string | QueryValues[], clause?: SqlClause, data?: ExecuteData): Promise<DatabaseResponse> {

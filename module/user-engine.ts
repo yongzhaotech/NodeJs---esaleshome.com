@@ -4,7 +4,7 @@ import type { Request, Response } from 'express';
 import { decode, sign, type JwtPayload } from 'jsonwebtoken';
 import type { QueryValues } from 'mysql2';
 import { mysql as sql, QueryResponse, DatabaseRow } from '../utils';
-import { hashRefreshToken } from '../utils/refresh-token';
+import { hashSha256 } from '../utils/hash';
 import { jwtConfig } from '../constants';
 
 // type DatabaseRow = Record<string, any>;
@@ -132,7 +132,7 @@ const signIn = (req: Request, res: Response) => {
 
 			sql.executeStmt(
 				'insert into refresh_tokens (id, expires_at) values (?, ?)',
-				[hashRefreshToken(refreshToken), refreshTokenExpiresAt]
+				[hashSha256(refreshToken), refreshTokenExpiresAt]
 			).then(result => {
 				if (result.error) {
 					res.send({ error: LANG_LABELS.unknown_error[lang] });
@@ -173,7 +173,7 @@ const signOut = (req: Request, res: Response) => {
 
 	const refreshToken = req.cookies['refresh-token'];
 	if (refreshToken) {
-		sql.executeStmt('delete from refresh_tokens where id = ?', [hashRefreshToken(refreshToken)]);
+		sql.executeStmt('delete from refresh_tokens where id = ?', [hashSha256(refreshToken)]);
 	}
 
 	res.clearCookie('session_id');

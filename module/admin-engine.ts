@@ -12,7 +12,9 @@ interface SiteConfig {
 const LANG_LABELS = require('../js/language').label(),
 	content = require('../js/static-content'),
 	fs = require('fs'),
-	directory = '../server/js',
+	path = require('path'),
+	projectDirectory = path.resolve(__dirname, '..', '..'),
+	directory = path.join(projectDirectory, 'js'),
 	siteMap = '../server/file/sitemap.txt',
 	config: { deleteAdvertise(id: unknown): Promise<unknown> } = require('./ad-config'),
 	helper = require('./helper');
@@ -182,7 +184,8 @@ const generateStaticContent = (req: Request, res: Response) => {
 
 	fs.writeFile(`${directory}/langs.js`, $js, (error: NodeJS.ErrnoException | null) => {
 		if(error) {
-			res.send({error: error});
+			res.status(500).send({error: error.message});
+			return;
 		}
 		
 		$js = `const page_vars={};page_vars['search_seq']={province:1,city:2,category:3,item:4,ad_keyword:5};page_vars['category']=[`;
@@ -196,7 +199,8 @@ const generateStaticContent = (req: Request, res: Response) => {
 		
 		sql.handle.query($stmt, (error, dataSet) => {
 			if(error) {
-				res.send({error: error});
+				res.status(500).send({error: error.message});
+				return;
 			}
 			
 			dataSet.forEach($_ => {
@@ -242,7 +246,8 @@ const generateStaticContent = (req: Request, res: Response) => {
 
 			sql.handle.query($stmt, (error, dataSet) => {
 				if(error) {
-					res.send({error: error});
+					res.status(500).send({error: error.message});
+					return;
 				}
 
 				dataSet.forEach($_ => {
@@ -302,12 +307,14 @@ const generateStaticContent = (req: Request, res: Response) => {
 
 				fs.writeFile(`${directory}/static-vars.js`, $js, (error: NodeJS.ErrnoException | null) => {
 					if(error) {
-						res.send({error: error});
+						res.status(500).send({error: error.message});
+						return;
 					}
 
 					sql.handle.query(`select * from site_config where site='advertise'`, (error, resultSet) => {
 						if(error) {
-							res.send({error: error});
+							res.status(500).send({error: error.message});
+							return;
 						}
 						
 						if(resultSet[0]) {
@@ -316,7 +323,8 @@ const generateStaticContent = (req: Request, res: Response) => {
 
 						sql.handle.query(`select * from site_authenticate where site='advertise'`, (error, resultSet) => {
 							if(error) {
-								res.send({error: error});
+								res.status(500).send({error: error.message});
+								return;
 							}
 
 							let $auth: Record<string, DatabaseRow> = {};
@@ -328,7 +336,8 @@ const generateStaticContent = (req: Request, res: Response) => {
 
 							fs.writeFile(`${directory}/static-content.js`, $content, (error: NodeJS.ErrnoException | null) => {
 								if(error) {
-									res.send({error: error});
+									res.status(500).send({error: error.message});
+									return;
 								}
 
 								res.send({ok: 'Static content file generated!'});
