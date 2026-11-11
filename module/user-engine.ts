@@ -1,9 +1,10 @@
 'use strict';
 
 import type { Request, Response } from 'express';
-import { sign } from 'jsonwebtoken';
+import { decode, sign, type JwtPayload } from 'jsonwebtoken';
 import type { QueryValues } from 'mysql2';
 import { mysql as sql, QueryResponse, DatabaseRow } from '../utils';
+import { hashRefreshToken } from '../utils/refresh-token';
 import { jwtConfig } from '../constants';
 
 // type DatabaseRow = Record<string, any>;
@@ -126,11 +127,21 @@ const signIn = (req: Request, res: Response) => {
 				jwtConfig.refreshSecret,
 				{ expiresIn: jwtConfig.refreshTokenExpiresIn }
 			);
+			const refreshTokenPayload = decode(refreshToken) as JwtPayload;
+			const refreshTokenExpiresAt = Number(refreshTokenPayload.exp) * 1000;
 
-			sql.executeStmt('insert into refresh_tokens (id) values (?)', [refreshToken]);
-			confidentialize(authenticatedUser);
-			session.create().then(promise => {
-				session.set(promise.sessionId, { user: authenticatedUser }).then(() => {
+			sql.executeStmt(
+				'insert into refresh_tokens (id, expires_at) values (?, ?)',
+				[hashRefreshToken(refreshToken), refreshTokenExpiresAt]
+			).then(result => {
+				if (result.error) {
+					res.send({ error: LANG_LABELS.unknown_error[lang] });
+					return;
+				}
+
+				confidentialize(authenticatedUser);
+				session.create().then(promise => {
+					session.set(promise.sessionId, { user: authenticatedUser }).then(() => {
 					// Send token back inside a highly secure cookie
 					// let the access token cookie be session cookie
 					res.cookie('access-token', accessToken, jwtConfig.COOKIE_OPTIONS);
@@ -145,7 +156,10 @@ const signIn = (req: Request, res: Response) => {
 							access_level: authenticatedUser.access_level
 						}
 					});
+					});
 				});
+			}).catch(() => {
+				res.send({ error: LANG_LABELS.unknown_error[lang] });
 			});
 		}
 	}).catch(() => {
@@ -158,7 +172,9 @@ const signOut = (req: Request, res: Response) => {
 		lang = req.cookies.lang;
 
 	const refreshToken = req.cookies['refresh-token'];
-	sql.executeStmt('delete from refresh_tokens where id = ?', [refreshToken]);
+	if (refreshToken) {
+		sql.executeStmt('delete from refresh_tokens where id = ?', [hashRefreshToken(refreshToken)]);
+	}
 
 	res.clearCookie('session_id');
 	res.clearCookie('user_is_signed_in');

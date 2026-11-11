@@ -6,126 +6,232 @@ import { sessionLifeTime } from '../constants';
 const helper = require('./helper');
 
 interface SessionEntry {
-	data: Record<string, unknown>;
-	time: number;
+    data: Record<string, unknown>;
+    time: number;
 }
 
 interface StoredSessionRow {
-	data: string;
-	time: number;
+    data: string;
+    time: number;
 }
 
-let sessionObject: Record<string, SessionEntry> = {};
+class SessionStore {
+    private readonly sessions = new Map<string, SessionEntry>();
 
-const exist = (sessionId: string | null = null): boolean => sessionId !== null && (sessionId in sessionObject);
+    has(sessionId: string | null): boolean {
+        return typeof sessionId === 'string' && this.sessions.has(sessionId);
+    }
 
-const create = (sessionId: string | null = null): Promise<{ sessionId: string }> => {
+    create(sessionId: string | null = null): Promise<{ sessionId: string }> {
+        if (sessionId === null) {
+            const id = helper.uuid();
+            const entry: SessionEntry = {
+                data: {},
+                time: Date.now(),
+            };
 
-	if (sessionId === null) {
-		const id = helper.uuid();
-		sessionObject = { ...sessionObject, ...{ [id]: { data: {}, time: Date.now() } } };
+            this.sessions.set(id, entry);
 
-		return new Promise((res, rej) => {
-			sql.handle.query('insert into nodesession (id, data, time) values (?, ?, ?)', [id, JSON.stringify(sessionObject[id].data), sessionObject[id].time], (error: Error | null) => {
-				if (error) {
-					delete sessionObject[id];
-					rej({ error: error });
-				} else {
-					res({ sessionId: id });
-				}
-			});
-		});
-	} else {
-		return new Promise((res, rej) => {
-			sql.handle.query('select * from nodesession where id = ?', [sessionId], (error: Error | null, result: StoredSessionRow[]) => {
-				if (error) {
-					rej({ error: error });
-				} else if (result[0]) {
-					sessionObject = { ...sessionObject, ...{ [sessionId]: { data: JSON.parse(result[0].data), time: result[0].time } } };
-					res({ sessionId: sessionId });
-				} else {
-					rej({ error: new Error('Session not found') });
-				}
-			});
-		});
-	}
-};
+            return new Promise((resolve, reject) => {
+                sql.handle.query(
+                    'insert into nodesession (id, data, time) values (?, ?, ?)',
+                    [id, JSON.stringify(entry.data), entry.time],
+                    (error: Error | null) => {
+                        if (error) {
+                            this.sessions.delete(id);
+                            reject({ error });
+                            return;
+                        }
 
-const set = (sessionId: string, hashObject: Record<string, unknown>): Promise<{ ok: true }> => {
-	return new Promise((res, rej) => {
-		let staleData = sessionObject[sessionId].data,
-			newData = { ...staleData, ...hashObject },
-			time = Date.now();
-		sql.handle.query('update nodesession set data = ?, time = ? where id = ?', [JSON.stringify(newData), time, sessionId], (error: Error | null) => {
-			if (error) {
-				rej({ error: error });
-			} else {
-				sessionObject[sessionId].time = time;
-				sessionObject[sessionId].data = newData;
-				res({ ok: true });
-			}
-		});
-	});
-};
+                        resolve({ sessionId: id });
+                    }
+                );
+            });
+        }
 
-const get = (sessionId: string, key: string): unknown => sessionObject[sessionId].data && sessionObject[sessionId].data[key] || null;
+        return new Promise((resolve, reject) => {
+            sql.handle.query<StoredSessionRow[]>(
+                'select * from nodesession where id = ?',
+                [sessionId],
+                (error, result = []) => {
+                    if (error) {
+                        reject({ error });
+                        return;
+                    }
 
-const remove = (sessionId: string, items: string[] | null = null): Promise<{ ok: true }> => {
-	return new Promise((res, rej) => {
-		if (items === null) {
-			sql.handle.query('delete from nodesession where id = ?', [sessionId], (error: Error | null) => {
-				if (error) {
-					rej({ error: error });
-				} else {
-					res({ ok: true });
-					delete sessionObject[sessionId];
-				}
-			});
-		} else {
-			let dbAction = false;
-			items.forEach(key => {
-				if (sessionObject[sessionId].data[key]) {
-					delete sessionObject[sessionId].data[key];
-					dbAction = true;
-				}
-			});
-			if (dbAction) {
-				let time = Date.now();
-				sql.handle.query('update nodesession set data = ?, time = ? where id = ?', [JSON.stringify(sessionObject[sessionId].data), time, sessionId], (error: Error | null) => {
-					if (error) {
-						rej({ error: error });
-					} else {
-						sessionObject[sessionId].time = time;
-						res({ ok: true });
-					}
-				});
-			} else {
-				res({ ok: true });
-			}
-		}
-	});
-};
+                    const row = result[0];
+                    if (!row) {
+                        reject({ error: new Error('Session not found') });
+                        return;
+                    }
 
-const expire = (sessionId: string): boolean => Date.now() - sessionObject[sessionId].time > sessionLifeTime;
+                    this.sessions.set(sessionId, {
+                        data: this.parseSessionData(row.data),
+                        time: row.time,
+                    });
 
-const update = (sessionId: string): Promise<{ ok: true }> => {
-	let time = Date.now();
-	return new Promise((res, rej) => {
-		sql.handle.query('update nodesession set time = ? where id = ?', [time, sessionId], (error: Error | null) => {
-			if (error) {
-				rej({ error: error });
-			} else {
-				sessionObject[sessionId].time = time;
-				res({ ok: true });
-			}
-		});
-	});
-};
+                    resolve({ sessionId });
+                }
+            );
+        });
+    }
+
+    set(sessionId: string, hashObject: Record<string, unknown>): Promise<{ ok: true }> {
+        const entry = this.sessions.get(sessionId);
+
+        if (!entry) {
+            return Promise.reject({ error: new Error('Session not found') });
+        }
+
+        const newData = { ...entry.data, ...hashObject };
+        const time = Date.now();
+
+        return new Promise((resolve, reject) => {
+            sql.handle.query(
+                'update nodesession set data = ?, time = ? where id = ?',
+                [JSON.stringify(newData), time, sessionId],
+                (error: Error | null) => {
+                    if (error) {
+                        reject({ error });
+                        return;
+                    }
+
+                    entry.data = newData;
+                    entry.time = time;
+                    resolve({ ok: true });
+                }
+            );
+        });
+    }
+
+    get(sessionId: string, key: string): unknown {
+        const entry = this.sessions.get(sessionId);
+
+        if (!entry) {
+            return null;
+        }
+
+        return Object.prototype.hasOwnProperty.call(entry.data, key)
+            ? entry.data[key]
+            : null;
+    }
+
+    remove(sessionId: string, items: string[] | null = null): Promise<{ ok: true }> {
+        const entry = this.sessions.get(sessionId);
+
+        if (!entry) {
+            return Promise.resolve({ ok: true });
+        }
+
+        if (items === null) {
+            return new Promise((resolve, reject) => {
+                sql.handle.query(
+                    'delete from nodesession where id = ?',
+                    [sessionId],
+                    (error: Error | null) => {
+                        if (error) {
+                            reject({ error });
+                            return;
+                        }
+
+                        this.sessions.delete(sessionId);
+                        resolve({ ok: true });
+                    }
+                );
+            });
+        }
+
+        let changed = false;
+
+        items.forEach((key) => {
+            if (Object.prototype.hasOwnProperty.call(entry.data, key)) {
+                delete entry.data[key];
+                changed = true;
+            }
+        });
+
+        if (!changed) {
+            return Promise.resolve({ ok: true });
+        }
+
+        const time = Date.now();
+
+        return new Promise((resolve, reject) => {
+            sql.handle.query(
+                'update nodesession set data = ?, time = ? where id = ?',
+                [JSON.stringify(entry.data), time, sessionId],
+                (error: Error | null) => {
+                    if (error) {
+                        reject({ error });
+                        return;
+                    }
+
+                    entry.time = time;
+                    resolve({ ok: true });
+                }
+            );
+        });
+    }
+
+    expire(sessionId: string): boolean {
+        const entry = this.sessions.get(sessionId);
+
+        if (!entry) {
+            return true;
+        }
+
+        return Date.now() - entry.time > sessionLifeTime;
+    }
+
+    update(sessionId: string): Promise<{ ok: true }> {
+        const entry = this.sessions.get(sessionId);
+
+        if (!entry) {
+            return Promise.reject({ error: new Error('Session not found') });
+        }
+
+        const time = Date.now();
+
+        return new Promise((resolve, reject) => {
+            sql.handle.query(
+                'update nodesession set time = ? where id = ?',
+                [time, sessionId],
+                (error: Error | null) => {
+                    if (error) {
+                        reject({ error });
+                        return;
+                    }
+
+                    entry.time = time;
+                    resolve({ ok: true });
+                }
+            );
+        });
+    }
+
+    private parseSessionData(rawData: string): Record<string, unknown> {
+        try {
+            return rawData ? (JSON.parse(rawData) as Record<string, unknown>) : {};
+        } catch {
+            return {};
+        }
+    }
+}
+
+const sessionStore = new SessionStore();
+
+const exist = (sessionId: string | null = null): boolean => sessionStore.has(sessionId);
+const create = (sessionId: string | null = null): Promise<{ sessionId: string }> => sessionStore.create(sessionId);
+const set = (sessionId: string, hashObject: Record<string, unknown>): Promise<{ ok: true }> => sessionStore.set(sessionId, hashObject);
+const get = (sessionId: string, key: string): unknown => sessionStore.get(sessionId, key);
+const remove = (sessionId: string, items: string[] | null = null): Promise<{ ok: true }> => sessionStore.remove(sessionId, items);
+const expire = (sessionId: string): boolean => sessionStore.expire(sessionId);
+const update = (sessionId: string): Promise<{ ok: true }> => sessionStore.update(sessionId);
 
 exports.exist = exist;
 exports.create = create;
 exports.set = set;
 exports.get = get;
 exports.remove = remove;
-// exports.expire = expire;
+exports.expire = expire;
 exports.update = update;
