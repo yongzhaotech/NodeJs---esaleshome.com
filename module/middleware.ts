@@ -1,7 +1,7 @@
 'use strict';
 import type { NextFunction, Request, Response } from 'express';
 import { sign, verify, JwtPayload, decode } from 'jsonwebtoken';
-import { mysql as sql, hashRefreshToken } from '../utils';
+import { mysql as sql, hashSha256 } from '../utils';
 import { jwtConfig, AUTH_STATUS, AuthStatus } from '../constants';
 
 const LANG_LABELS = require('../js/language').label(),
@@ -54,7 +54,7 @@ const refreshAccessToken = async (req: MiddlewareRequest, res: Response): Promis
 	const refreshToken = req.cookies['refresh-token'];
 	if (refreshToken) {
 		try {
-			const tokenHash = hashRefreshToken(refreshToken);
+			const tokenHash = hashSha256(refreshToken);
 			const { data = [] } = await sql.executeQuery('select', 'refresh_tokens', { id: tokenHash });
 			if (data.length === 0) {
 				// refresh token not found in the db
