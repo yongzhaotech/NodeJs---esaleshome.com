@@ -5,6 +5,7 @@ import { decode, sign, type JwtPayload } from 'jsonwebtoken';
 import type { QueryValues } from 'mysql2';
 import { mysql as sql, QueryResponse, DatabaseRow } from '../utils';
 import { hashSha256 } from '../utils/hash';
+import { hashPassword, verifyPassword } from '../utils/password';
 import { jwtConfig } from '../constants';
 
 // type DatabaseRow = Record<string, any>;
@@ -113,9 +114,13 @@ const signIn = (req: Request, res: Response) => {
 
 		if (password === '') {
 			return res.send({ error: LANG_LABELS.r_password[lang] });
-		} else if (authenticatedUser.password !== helper.siteEncryption(email.toLowerCase(), password)) {
-			return res.send({ error: LANG_LABELS.wrong_password[lang] });
-		} else {
+		}
+
+		return verifyPassword(password, authenticatedUser.password || '').then(isValid => {
+			if (!isValid) {
+				return res.send({ error: LANG_LABELS.wrong_password[lang] });
+			}
+
 			const userPayload = { userId: authenticatedUser.id, email: authenticatedUser.email, access_level: authenticatedUser.access_level };
 			const accessToken = sign(
 				userPayload,
@@ -161,7 +166,9 @@ const signIn = (req: Request, res: Response) => {
 			}).catch(() => {
 				res.send({ error: LANG_LABELS.unknown_error[lang] });
 			});
-		}
+		}).catch(() => {
+			res.send({ error: LANG_LABELS.unknown_error[lang] });
+		});
 	}).catch(() => {
 		res.send({ error: LANG_LABELS.unknown_error[lang] });
 	});
@@ -225,11 +232,13 @@ const register = (req: Request, res: Response) => {
 			if (user !== null) {
 				res.send({ error: LANG_LABELS.email_exist[lang] });
 			} else {
-				sql.executeStmt('insert into user (first_name, last_name, middle_name, password, email, active, create_time, edit_time) values (?, ?, ?, ?, ?, ?, now(), now())', [first_name, last_name, middle_name, helper.siteEncryption(email, password), email, 1]).then((promise: QueryResponse) => {
-					res.send(promise.error ? { error: promise.error } : { message: LANG_LABELS.account_done[lang] });
-				}).catch(() => {
-					res.send({ error: LANG_LABELS.unknown_error[lang] });
-				});
+			void hashPassword(password).then(passwordHash =>
+				sql.executeStmt('insert into user (first_name, last_name, middle_name, password, email, active, create_time, edit_time) values (?, ?, ?, ?, ?, ?, now(), now())', [first_name, last_name, middle_name, passwordHash, email, 1])
+			).then((insertResult: QueryResponse) => {
+				res.send(insertResult.error ? { error: insertResult.error } : { message: LANG_LABELS.account_done[lang] });
+			}).catch(() => {
+				res.send({ error: LANG_LABELS.unknown_error[lang] });
+			});
 			}
 		}).catch(() => {
 			res.send({ error: LANG_LABELS.unknown_error[lang] });
@@ -312,9 +321,11 @@ const resetPassword = (req: Request, res: Response) => {
 			if (user === null) {
 				return res.send({ error: LANG_LABELS.wrong_url_param[lang] });
 			} else {
-				sql.executeQuery('update', 'user', { id: user.id }, { acc_code: '', password: helper.siteEncryption(user.email, password) }).then((_promise: QueryResponse) => {
+				void hashPassword(password).then(passwordHash =>
+					sql.executeQuery('update', 'user', { id: user.id }, { acc_code: '', password: passwordHash })
+				).then(() => {
 					res.send({ message: LANG_LABELS.pwd_reseted[lang] });
-				}).catch((e) => {
+				}).catch(() => {
 					res.send({ error: LANG_LABELS.unknown_error[lang] });
 				});
 			}
@@ -379,17 +390,18 @@ const workUserData = (req: Request, res: Response) => {
 			res.send({ error: error });
 		} else {
 			let update: Partial<UserSession> & Record<string, unknown> = { first_name: firstName, last_name: lastName };
-			if (password !== '') {
-				update.password = helper.siteEncryption(currentUser.email, password);
-			}
-			const updatedUser = { ...currentUser, ...update };
-			confidentialize(updatedUser);
-			session.set(req.cookies.session_id, { user: updatedUser }).then(() => {
-				sql.executeQuery('update', 'user', { id: currentUser.id }, update).then(promise => {
+			const saveProfile = () => {
+				const updatedUser = { ...currentUser, ...update };
+				confidentialize(updatedUser);
+				return session.set(req.cookies.session_id, { user: updatedUser }).then(() =>
+					sql.executeQuery('update', 'user', { id: currentUser.id }, update)
+				).then(promise => {
 					res.send(promise.ok ? { message: LANG_LABELS.edit_profile_done[lang] } : { error: promise.error });
-				}).catch(() => {
-					res.send({ error: LANG_LABELS.unknown_error[lang] });
 				});
+			};
+			const passwordHashPromise = password !== '' ? hashPassword(password).then(passwordHash => { update.password = passwordHash; }) : Promise.resolve();
+			void passwordHashPromise.then(saveProfile).catch(() => {
+				res.send({ error: LANG_LABELS.unknown_error[lang] });
 			});
 		}
 	} else {
