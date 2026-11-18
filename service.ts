@@ -1,10 +1,10 @@
 'use strict';
-import express, { type Express } from 'express';
-import oidcProvider from './module/oidc-provider';
+import express, { type Express, type Router } from 'express';
 
 require('dotenv').config();
 
 const sql = require('./utils').mysql,
+	oidcProvider: Router = require('./module/oidc-provider').default,
 	cookieParser = require('cookie-parser'),
 	multer = require('multer'),
 	config = require('./module/ad-config'),
