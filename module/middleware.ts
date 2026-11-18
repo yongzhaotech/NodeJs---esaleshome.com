@@ -15,6 +15,14 @@ const LANG_LABELS = require('../js/language').label(),
 		'http://192.168.2.32:3000': true,
 		'http://localhost:5173': true
 	};
+const oidcPaths = new Set([
+	'/.well-known/openid-configuration',
+	'/authorize',
+	'/token',
+	'/jwks',
+	'/userinfo',
+	'/profile'
+]);
 
 type Language = 'en' | 'cn';
 
@@ -159,9 +167,12 @@ const accessControl = async (req: MiddlewareRequest, res: Response, next: NextFu
 	res.append('Access-Control-Allow-Credentials', String(true));
 	if (origin.toLowerCase() in origins) {
 		res.append('Access-Control-Allow-Origin', origin);
+		res.append('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+		res.append('Access-Control-Allow-Headers', 'Authorization, Content-Type');
 	}
 	if (!req.cookies.lang) { res.cookie('lang', 'en'); }
 	if (req.method === 'OPTIONS') { res.end(); return; }
+	if (oidcPaths.has(req.path)) { next(); return; }
 
 	try {
 		const result = await checkSession(req, res);
