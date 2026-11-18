@@ -1,11 +1,11 @@
 'use strict';
 import express, { type Express, type Router } from 'express';
+import { mysql as sql } from './utils';
+import oidcProvider from './module/oidc-provider';
 
 require('dotenv').config();
 
-const sql = require('./utils').mysql,
-	oidcProvider: Router = require('./module/oidc-provider').default,
-	cookieParser = require('cookie-parser'),
+const cookieParser = require('cookie-parser'),
 	multer = require('multer'),
 	config = require('./module/ad-config'),
 	upload = multer({ dest: config.uploadDirectory, fileFilter: config.fileFilter, limits: { fileSize: config.photoSize, files: config.fileCount } }),
@@ -17,7 +17,7 @@ const sql = require('./utils').mysql,
 	category = require('./module/category-engine'),
 	videoEngine = require('./module/video-engine'),
 	port = 88,
-		host = '127.0.0.1',
+	host = '127.0.0.1',
 	app: Express = express();
 
 app.use(cookieParser());
