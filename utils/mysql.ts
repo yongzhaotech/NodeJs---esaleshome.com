@@ -16,6 +16,7 @@ export interface DatabaseResponse {
     data?: DatabaseRows;
     ok?: number;
     key?: number | null;
+    affectedRows?: number;
     error?: unknown;
 }
 
@@ -119,6 +120,9 @@ class _Mysql {
                     resolve({ error: sqlError(error) });
                 } else {
                     const response: DatabaseResponse = { ok: 1 };
+                    if (result && typeof result === 'object' && 'affectedRows' in result) {
+                        response.affectedRows = Number((result as any).affectedRows) || 0;
+                    }
                     if (stmt.match(/^insert/i)) {
                         response.key = result && typeof result === 'object' && 'insertId' in result ? Number((result as any).insertId ?? 0) || null : null;
                     }

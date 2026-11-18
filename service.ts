@@ -1,5 +1,6 @@
 'use strict';
 import express, { type Express } from 'express';
+import oidcProvider from './module/oidc-provider';
 
 require('dotenv').config();
 
@@ -16,13 +17,14 @@ const sql = require('./utils').mysql,
 	category = require('./module/category-engine'),
 	videoEngine = require('./module/video-engine'),
 	port = 88,
-	host = '0.0.0.0',
+		host = '127.0.0.1',
 	app: Express = express();
 
 app.use(cookieParser());
 app.use(express.json()); // Middleware to parse JSON bodies
 app.use('/image/ad', express.static(config.imageDirectory, { fallthrough: false }));
 app.use(middleWare.accessControl);
+app.use(oidcProvider);
 
 const cleanupExpiredRefreshTokens = async (): Promise<void> => {
 	const result = await sql.executeStmt('delete from refresh_tokens where expires_at <= ?', [Date.now()]);
