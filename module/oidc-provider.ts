@@ -116,11 +116,11 @@ const renderLogin = (res: Response, request: AuthorizationRequest, errorMessage 
 		'Cache-Control': 'no-store'
 	}).status(errorMessage ? 401 : 200).type('html').send(`<!doctype html>
 <html lang="en">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Local OIDC sign in</title></head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>OIDC sign in</title></head>
 <body style="font:16px sans-serif;max-width:28rem;margin:3rem auto;padding:0 1rem">
-	<h1>Sign in to esaleshome learning</h1>
-	<p>This local demo authorization server is asking you to sign in.</p>
-	<p>The configured local client is pre-approved for: <code>${escapeHtml(request.scope)}</code></p>
+	<h1>Esaleshome SSO</h1>
+	<p>This authorization server is asking you to sign in.</p>
+	<p>The configured client is pre-approved for: <code>${escapeHtml(request.scope)}</code></p>
 	${errorMessage ? `<p role="alert">${escapeHtml(errorMessage)}</p>` : ''}
 	<form method="post" action="/authorize">
 		${hiddenFields}
