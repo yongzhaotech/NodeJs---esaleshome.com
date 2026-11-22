@@ -12,6 +12,7 @@ const LANG_LABELS = require('../js/language').label(),
 		'www.esaleshome.com': true,
 		'esaleshome.com': true,
 		'http://localhost:3000': true,
+		'http://localhost:3001': true,
 		'http://192.168.2.32:3000': true,
 		'http://localhost:5173': true
 	};

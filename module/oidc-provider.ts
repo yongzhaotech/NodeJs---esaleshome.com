@@ -1,7 +1,8 @@
 import { createHash, generateKeyPairSync, randomBytes, timingSafeEqual } from 'node:crypto';
 import { Router, urlencoded, type Request, type Response } from 'express';
-import { sign, verify } from 'jsonwebtoken';
-import { mysql as sql, type QueryResponse } from '../utils';
+import { sign, verify, type JwtPayload } from 'jsonwebtoken';
+import { jwtConfig } from '../constants';
+import { hashSha256, mysql as sql, type QueryResponse } from '../utils';
 import { verifyPassword } from '../utils/password';
 
 // Local-only learning provider: one SPA client, in-memory codes, and an ephemeral signing key.
@@ -13,6 +14,7 @@ interface Account {
 	first_name: string;
 	last_name: string;
 	active: number | string;
+	access_level: number | string;
 }
 
 interface AuthorizationRequest {
@@ -36,25 +38,91 @@ interface AuthorizationCodeRecord {
 }
 
 const issuer = 'http://localhost:88';
-const clientId = 'esales_home_learning';
-const redirectUris = new Set(['http://localhost:3000/ads/dashboard']);
-const supportedScopes = new Set(['openid', 'profile', 'email', 'api.read']);
+const clientIds = new Set(['esales_home_learning', 'nextjs-project']);
+const redirectUris = new Set(['http://localhost:3000/ads/dashboard', 'http://localhost:3001/api/auth/callback']);
+const supportedScopes = new Set(['openid', 'profile', 'email', 'api.read', 'access_level']);
 const accessTokenAudience = 'esaleshome-api';
 const authorizationCodeLifetimeMs = 60_000;
 const accessTokenLifetimeSeconds = 15 * 60;
+const refreshTokenLifetimeMs = 7 * 24 * 60 * 60 * 1000;
 const expressUrlEncoded = urlencoded({ extended: false });
 const { privateKey, publicKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
 const signingKeyId = randomBytes(12).toString('base64url');
 const publicJwk = publicKey.export({ format: 'jwk' });
+const formActions = new Set(['http://localhost:88', 'http://localhost:3000', 'http://localhost:3001']);
 
 const router = Router();
+
+const issueTokenSet = async (account: Account, clientId: string, scope: string, nonce?: string | null) => {
+	const issuedAt = Math.floor(Date.now() / 1000);
+	const userName = `${account.first_name} ${account.last_name}`.trim();
+	const grantedScopes = new Set(scope.split(' '));
+	const accessTokenClaims: Record<string, string> = {
+		iss: issuer,
+		sub: String(account.id),
+		aud: accessTokenAudience,
+		client_id: clientId,
+		scope
+	};
+	if (grantedScopes.has('profile')) {
+		accessTokenClaims.name = userName;
+		accessTokenClaims.given_name = account.first_name;
+		accessTokenClaims.family_name = account.last_name;
+	}
+	if (grantedScopes.has('access_level')) {
+		accessTokenClaims.access_level = String(account.access_level);
+	}
+	if (grantedScopes.has('email')) {
+		accessTokenClaims.email = account.email;
+	}
+	const accessToken = sign(accessTokenClaims, privateKey, { algorithm: 'RS256', keyid: signingKeyId, expiresIn: accessTokenLifetimeSeconds });
+	const refreshToken = sign({
+		sub: String(account.id),
+		client_id: clientId,
+		scope
+	}, jwtConfig.refreshSecret, { expiresIn: jwtConfig.refreshTokenExpiresIn });
+	const refreshTokenExpiresAt = Date.now() + refreshTokenLifetimeMs;
+	const storedRefreshToken = await sql.executeStmt(
+		'insert into refresh_tokens (id, expires_at) values (?, ?)',
+		[hashSha256(refreshToken), refreshTokenExpiresAt]
+	);
+	if (storedRefreshToken.error) {
+		return null;
+	}
+	const idTokenClaims: Record<string, string> = {
+		iss: issuer,
+		sub: String(account.id)
+	};
+	if (grantedScopes.has('profile')) {
+		idTokenClaims.name = userName;
+		idTokenClaims.given_name = account.first_name;
+		idTokenClaims.family_name = account.last_name;
+	}
+	if (grantedScopes.has('email')) {
+		idTokenClaims.email = account.email;
+	}
+	const idToken = sign({
+		...idTokenClaims,
+		aud: clientId,
+		...(nonce ? { nonce } : {})
+	}, privateKey, { algorithm: 'RS256', keyid: signingKeyId, expiresIn: accessTokenLifetimeSeconds });
+	return {
+		access_token: accessToken,
+		refresh_token: refreshToken,
+		refresh_token_expires_in: Math.floor(refreshTokenLifetimeMs / 1000),
+		token_type: 'Bearer',
+		expires_in: accessTokenLifetimeSeconds,
+		scope,
+		id_token: idToken
+	};
+};
 
 const getSingleValue = (value: unknown): string | undefined => typeof value === 'string' ? value : undefined;
 
 const parseAuthorizationRequest = (input: Record<string, unknown>): { request?: AuthorizationRequest; error?: string } => {
 	const requestClientId = getSingleValue(input.client_id);
 	const redirectUri = getSingleValue(input.redirect_uri);
-	if (requestClientId !== clientId || !redirectUri || !redirectUris.has(redirectUri)) {
+	if (!requestClientId || !clientIds.has(requestClientId) || !redirectUri || !redirectUris.has(redirectUri)) {
 		return { error: 'invalid_client' };
 	}
 
@@ -111,16 +179,16 @@ const renderLogin = (res: Response, request: AuthorizationRequest, errorMessage 
 	].map(([name, value]) => `<input type="hidden" name="${name}" value="${escapeHtml(value)}">`).join('');
 
 	res.set({
-		'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; connect-src 'self'; form-action 'self' http://localhost:88 http://localhost:3000; base-uri 'none'; frame-ancestors 'none'",
+		'Content-Security-Policy': `default-src 'none'; style-src 'unsafe-inline'; connect-src 'self'; form-action 'self' ${[...formActions].join(' ')}; base-uri 'none'; frame-ancestors 'none'`,
 		'X-Content-Type-Options': 'nosniff',
 		'Cache-Control': 'no-store'
 	}).status(errorMessage ? 401 : 200).type('html').send(`<!doctype html>
 <html lang="en">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Local OIDC sign in</title></head>
 <body style="font:16px sans-serif;max-width:28rem;margin:3rem auto;padding:0 1rem">
-	<h1>Sign in to esaleshome learning</h1>
-	<p>This local demo authorization server is asking you to sign in.</p>
-	<p>The configured local client is pre-approved for: <code>${escapeHtml(request.scope)}</code></p>
+	<h1>Sign in to ${request.clientId}</h1>
+	<p>This authorization server is asking you to sign in.</p>
+	<p>The configured client is pre-approved for: <code>${escapeHtml(request.scope)}</code></p>
 	${errorMessage ? `<p role="alert">${escapeHtml(errorMessage)}</p>` : ''}
 	<form method="post" action="/authorize">
 		${hiddenFields}
@@ -141,7 +209,7 @@ router.get('/.well-known/openid-configuration', (_req, res) => {
 		jwks_uri: `${issuer}/jwks`,
 		response_types_supported: ['code'],
 		response_modes_supported: ['query'],
-		grant_types_supported: ['authorization_code'],
+		grant_types_supported: ['authorization_code', 'refresh_token'],
 		subject_types_supported: ['public'],
 		id_token_signing_alg_values_supported: ['RS256'],
 		token_endpoint_auth_methods_supported: ['none'],
@@ -212,13 +280,66 @@ router.post('/authorize', expressUrlEncoded, async (req: Request, res: Response)
 
 router.post('/token', expressUrlEncoded, async (req: Request, res: Response) => {
 	res.set({ 'Cache-Control': 'no-store', Pragma: 'no-cache' });
-	const { grant_type: grantType, code, redirect_uri: redirectUri, client_id: requestClientId, code_verifier: codeVerifier } = req.body;
+	const { grant_type: grantType, code, redirect_uri: redirectUri, client_id: requestClientId, code_verifier: codeVerifier, refresh_token: refreshToken } = req.body;
 	if (req.body.client_secret) {
 		return res.status(400).json({ error: 'invalid_client' });
 	}
+
+	if (grantType === 'refresh_token') {
+		if (!clientIds.has(requestClientId) || typeof refreshToken !== 'string' || !refreshToken) {
+			return res.status(400).json({ error: 'invalid_request' });
+		}
+
+		try {
+			const claims = verify(refreshToken, jwtConfig.refreshSecret, { algorithms: ['HS256'] }) as JwtPayload;
+			if (typeof claims.sub !== 'string' || claims.client_id !== requestClientId || typeof claims.scope !== 'string') {
+				return res.status(400).json({ error: 'invalid_grant' });
+			}
+
+			const tokenHash = hashSha256(refreshToken);
+			const lookup = await sql.executeQuery('select', 'refresh_tokens', { id: tokenHash }) as QueryResponse;
+			if (lookup.error) {
+				return res.status(500).json({ error: 'server_error' });
+			}
+			const storedToken = lookup.data?.[0];
+			if (!storedToken || !Number.isFinite(Number(storedToken.expires_at)) || Date.now() >= Number(storedToken.expires_at)) {
+				return res.status(400).json({ error: 'invalid_grant' });
+			}
+
+			// Consume the presented refresh token atomically so concurrent replays cannot both rotate it.
+			const consumed = await sql.executeStmt(
+				'delete from refresh_tokens where id = ? and expires_at > ?',
+				[tokenHash, Date.now()]
+			);
+			if (consumed.error) {
+				return res.status(500).json({ error: 'server_error' });
+			}
+			if (consumed.affectedRows !== 1) {
+				return res.status(400).json({ error: 'invalid_grant' });
+			}
+
+			const accountResult = await sql.executeQuery('select', 'user', { id: claims.sub }) as QueryResponse;
+			if (accountResult.error) {
+				return res.status(500).json({ error: 'server_error' });
+			}
+			const account = accountResult.data?.[0] as Account | undefined;
+			if (!account || Number(account.active) !== 1) {
+				return res.status(400).json({ error: 'invalid_grant' });
+			}
+
+			const tokenSet = await issueTokenSet(account, requestClientId, claims.scope);
+			if (!tokenSet) {
+				return res.status(500).json({ error: 'server_error' });
+			}
+			return res.json(tokenSet);
+		} catch {
+			return res.status(400).json({ error: 'invalid_grant' });
+		}
+	}
+
 	if (
 		grantType !== 'authorization_code' ||
-		requestClientId !== clientId ||
+		!clientIds.has(requestClientId) ||
 		typeof code !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(code) ||
 		typeof redirectUri !== 'string' ||
 		typeof codeVerifier !== 'string'
@@ -269,51 +390,11 @@ router.post('/token', expressUrlEncoded, async (req: Request, res: Response) => 
 			return res.status(400).json({ error: 'invalid_grant' });
 		}
 
-		const issuedAt = Math.floor(Date.now() / 1000);
-		const expiresAt = issuedAt + accessTokenLifetimeSeconds;
-		const userName = `${account.first_name} ${account.last_name}`.trim();
-		const grantedScopes = new Set(authorization.scope.split(' '));
-		const accessTokenClaims: Record<string, string> = {
-			iss: issuer,
-			sub: String(account.id),
-			aud: accessTokenAudience,
-			client_id: authorization.client_id,
-			scope: authorization.scope
-		};
-		if (grantedScopes.has('profile')) {
-			accessTokenClaims.name = userName;
-			accessTokenClaims.given_name = account.first_name;
-			accessTokenClaims.family_name = account.last_name;
+		const tokenSet = await issueTokenSet(account, authorization.client_id, authorization.scope, authorization.nonce);
+		if (!tokenSet) {
+			return res.status(500).json({ error: 'server_error' });
 		}
-		if (grantedScopes.has('email')) {
-			accessTokenClaims.email = account.email;
-		}
-		const accessToken = sign(accessTokenClaims, privateKey, { algorithm: 'RS256', keyid: signingKeyId, expiresIn: accessTokenLifetimeSeconds });
-		const idTokenClaims: Record<string, string> = {
-			iss: issuer,
-			sub: String(account.id)
-		};
-		if (grantedScopes.has('profile')) {
-			idTokenClaims.name = userName;
-			idTokenClaims.given_name = account.first_name;
-			idTokenClaims.family_name = account.last_name;
-		}
-		if (grantedScopes.has('email')) {
-			idTokenClaims.email = account.email;
-		}
-		const idToken = sign({
-			...idTokenClaims,
-			aud: authorization.client_id,
-			...(authorization.nonce ? { nonce: authorization.nonce } : {})
-		}, privateKey, { algorithm: 'RS256', keyid: signingKeyId, expiresIn: accessTokenLifetimeSeconds });
-
-		return res.json({
-			access_token: accessToken,
-			token_type: 'Bearer',
-			expires_in: expiresAt - issuedAt,
-			scope: authorization.scope,
-			id_token: idToken
-		});
+		return res.json(tokenSet);
 	} catch {
 		return res.status(500).json({ error: 'server_error' });
 	}
