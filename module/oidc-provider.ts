@@ -37,9 +37,9 @@ interface AuthorizationCodeRecord {
 	nonce: string | null;
 }
 
-const issuer = 'http://localhost:88';
+const issuer = process.env.ISSUER_BASE_URL as string;
 const clientIds = new Set(['esales_home_learning', 'nextjs-project']);
-const redirectUris = new Set(['http://localhost:3000/ads/dashboard', 'http://localhost:3001/api/auth/callback']);
+const redirectUris = new Set(['http://localhost:3000/ads/dashboard', 'https://app.localhost/api/auth/callback']);
 const supportedScopes = new Set(['openid', 'profile', 'email', 'api.read', 'access_level']);
 const accessTokenAudience = 'esaleshome-api';
 const authorizationCodeLifetimeMs = 60_000;
@@ -49,7 +49,7 @@ const expressUrlEncoded = urlencoded({ extended: false });
 const { privateKey, publicKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
 const signingKeyId = randomBytes(12).toString('base64url');
 const publicJwk = publicKey.export({ format: 'jwk' });
-const formActions = new Set(['http://localhost:88', 'http://localhost:3000', 'http://localhost:3001']);
+const formActions = new Set(['https://auth.localhost', 'http://localhost:3000', 'https://app.localhost']);
 
 const router = Router();
 
