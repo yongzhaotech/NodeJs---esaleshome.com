@@ -2,6 +2,8 @@ type CookieOptions = {
     httpOnly: boolean;
     secure: boolean;
     sameSite: 'strict';
+    domain: '.app.test',  // <-- Shares the cookie across all *.app.test subdomains
+    path: '/',
 };
 
 export const AUTH_STATUS = {
@@ -22,7 +24,9 @@ type AuthStatusResponse = {
 const COOKIE_OPTIONS: CookieOptions = {
     httpOnly: true,
     secure: true,
-    sameSite: 'strict'
+    sameSite: 'strict',
+    domain: '.app.test',
+    path: '/',
 };
 
 const accessTokenExpiresIn = '15m';

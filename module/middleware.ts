@@ -12,8 +12,9 @@ const LANG_LABELS = require('../js/language').label(),
 		'www.esaleshome.com': true,
 		'esaleshome.com': true,
 		'http://localhost:3000': true,
+		'https://react.app.test': true,
 		'http://localhost:3001': true,
-		'https://app.localhost': true,
+		'https://nextjs.app.test': true,
 		'http://192.168.2.32:3000': true,
 		'http://localhost:5173': true
 	};
@@ -172,18 +173,24 @@ const accessControl = async (req: MiddlewareRequest, res: Response, next: NextFu
 		res.append('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
 		res.append('Access-Control-Allow-Headers', 'Authorization, Content-Type');
 	}
-	if (!req.cookies.lang) { res.cookie('lang', 'en'); }
+	if (!req.cookies.lang) { res.cookie('lang', 'en', { domain: '.app.test', path: '/' }); }
 	if (req.method === 'OPTIONS') { res.end(); return; }
 	if (oidcPaths.has(req.path)) { next(); return; }
 
 	try {
 		const result = await checkSession(req, res);
 		if (result === AUTH_STATUS.OK) {
-			res.cookie('user_is_signed_in', 1);
+			res.cookie('user_is_signed_in', 1, {
+				domain: '.app.test',
+				path: '/'
+			});
 		}
 	} catch (error) {
 		res.clearCookie('session_id');
-		res.clearCookie('user_is_signed_in');
+		res.clearCookie('user_is_signed_in', {
+			domain: '.app.test',
+			path: '/'
+		});
 		// Instantly clear the cookie on the client side
 		res.clearCookie('access-token', jwtConfig.COOKIE_OPTIONS);
 		res.clearCookie('refresh-token', jwtConfig.COOKIE_OPTIONS);

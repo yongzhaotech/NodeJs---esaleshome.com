@@ -147,20 +147,20 @@ const signIn = (req: Request, res: Response) => {
 				confidentialize(authenticatedUser);
 				session.create().then(promise => {
 					session.set(promise.sessionId, { user: authenticatedUser }).then(() => {
-					// Send token back inside a highly secure cookie
-					// let the access token cookie be session cookie
-					res.cookie('access-token', accessToken, jwtConfig.COOKIE_OPTIONS);
-					res.cookie('refresh-token', refreshToken, { ...jwtConfig.COOKIE_OPTIONS, maxAge: jwtConfig.refreshTokenMaxAge });
-					res.cookie('session_id', promise.sessionId);
-					res.cookie('user_is_signed_in', 1);
-					res.send({
-						user: {
-							email: authenticatedUser.email,
-							first_name: authenticatedUser.first_name,
-							last_name: authenticatedUser.last_name,
-							access_level: authenticatedUser.access_level
-						}
-					});
+						// Send token back inside a highly secure cookie
+						// let the access token cookie be session cookie
+						res.cookie('access-token', accessToken, jwtConfig.COOKIE_OPTIONS);
+						res.cookie('refresh-token', refreshToken, { ...jwtConfig.COOKIE_OPTIONS, maxAge: jwtConfig.refreshTokenMaxAge });
+						res.cookie('session_id', promise.sessionId, { domain: '.app.test', path: '/' });
+						res.cookie('user_is_signed_in', 1, { domain: '.app.test', path: '/' });
+						res.send({
+							user: {
+								email: authenticatedUser.email,
+								first_name: authenticatedUser.first_name,
+								last_name: authenticatedUser.last_name,
+								access_level: authenticatedUser.access_level
+							}
+						});
 					});
 				});
 			}).catch(() => {
@@ -183,8 +183,8 @@ const signOut = (req: Request, res: Response) => {
 		sql.executeStmt('delete from refresh_tokens where id = ?', [hashSha256(refreshToken)]);
 	}
 
-	res.clearCookie('session_id');
-	res.clearCookie('user_is_signed_in');
+	res.clearCookie('session_id', { domain: '.app.test', path: '/' });
+	res.clearCookie('user_is_signed_in', { domain: '.app.test', path: '/' });
 	// Instantly clear the cookie on the client side
 	res.clearCookie('access-token', jwtConfig.COOKIE_OPTIONS);
 	res.clearCookie('refresh-token', jwtConfig.COOKIE_OPTIONS);
@@ -232,13 +232,13 @@ const register = (req: Request, res: Response) => {
 			if (user !== null) {
 				res.send({ error: LANG_LABELS.email_exist[lang] });
 			} else {
-			void hashPassword(password).then(passwordHash =>
-				sql.executeStmt('insert into user (first_name, last_name, middle_name, password, email, active, create_time, edit_time) values (?, ?, ?, ?, ?, ?, now(), now())', [first_name, last_name, middle_name, passwordHash, email, 1])
-			).then((insertResult: QueryResponse) => {
-				res.send(insertResult.error ? { error: insertResult.error } : { message: LANG_LABELS.account_done[lang] });
-			}).catch(() => {
-				res.send({ error: LANG_LABELS.unknown_error[lang] });
-			});
+				void hashPassword(password).then(passwordHash =>
+					sql.executeStmt('insert into user (first_name, last_name, middle_name, password, email, active, create_time, edit_time) values (?, ?, ?, ?, ?, ?, now(), now())', [first_name, last_name, middle_name, passwordHash, email, 1])
+				).then((insertResult: QueryResponse) => {
+					res.send(insertResult.error ? { error: insertResult.error } : { message: LANG_LABELS.account_done[lang] });
+				}).catch(() => {
+					res.send({ error: LANG_LABELS.unknown_error[lang] });
+				});
 			}
 		}).catch(() => {
 			res.send({ error: LANG_LABELS.unknown_error[lang] });
